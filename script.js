@@ -1,23 +1,22 @@
-// 默认配置数据 (仅用于预设填充)
+// 默认配置数据
 const PRESETS = {
     '6well': {
-        name: '六孔板规格',
+        name: '六孔板 (6-well)',
         optiA: 125, lipo: 5, optiB: 125, sirna: 5
     },
     '60mm': {
-        name: '中皿规格',
+        name: '60mm 培养皿',
         optiA: 250, lipo: 10, optiB: 250, sirna: 10
     }
 };
 
 let groups = [
-    { id: 1, name: 'NC (对照)', wells: 1 },
-    { id: 1002, name: 'siRNA-Target1', wells: 3 }
+    { id: 1, name: 'siNC', wells: 1 },
+    { id: 1002, name: 'siRNA-1', wells: 3 }
 ];
 
-// 初始化
 document.addEventListener('DOMContentLoaded', () => {
-    loadPreset(); // 加载默认预设数值到输入框
+    loadPreset();
     renderGroups();
 });
 
@@ -30,7 +29,6 @@ function loadPreset() {
     document.getElementById('volSiRNA').value = p.sirna;
 }
 
-// 渲染分组列表
 function renderGroups() {
     const list = document.getElementById('groupsList');
     list.innerHTML = '';
@@ -39,21 +37,35 @@ function renderGroups() {
         const div = document.createElement('div');
         div.className = 'group-item';
         div.innerHTML = `
-            <input type="text" placeholder="分组名称 (如 NC)" value="${group.name}" onchange="updateGroup(${index}, 'name', this.value)">
-            <input type="number" placeholder="孔数" value="${group.wells}" min="0" step="1" onchange="updateGroup(${index}, 'wells', this.value)">
-            <button class="btn-remove" onclick="removeGroup(${index})" title="删除分组"><i class="fas fa-times"></i></button>
+            <input type="text" placeholder="分组名称" value="${group.name}" onchange="updateGroup(${index}, 'name', this.value)">
+            <div class="input-with-unit" style="margin-bottom:0; flex:1;">
+                <input type="number" placeholder="孔数" value="${group.wells}" min="0" step="1" onchange="updateGroup(${index}, 'wells', this.value)">
+                <span style="font-size:0.75rem;">孔</span>
+            </div>
+            <button class="btn-icon" onclick="removeGroup(${index})" title="删除"><i class="fas fa-trash-alt"></i></button>
         `;
         list.appendChild(div);
     });
 }
 
-// 添加分组
 function addGroup() {
-    groups.push({ id: Date.now(), name: `Group ${groups.length + 1}`, wells: 1 });
+    const nextIndex = getNextSiRnaIndex();
+    groups.push({ id: Date.now(), name: `siRNA-${nextIndex}`, wells: 1 });
     renderGroups();
 }
 
-// 删除分组
+function getNextSiRnaIndex() {
+    let maxIndex = 0;
+    groups.forEach(group => {
+        const match = String(group.name).match(/sirna[- ]?(\\d+)/i);
+        if (match) {
+            const num = parseInt(match[1], 10);
+            if (!Number.isNaN(num)) maxIndex = Math.max(maxIndex, num);
+        }
+    });
+    return maxIndex + 1;
+}
+
 function removeGroup(index) {
     if (groups.length <= 1) {
         alert("至少保留一个分组！");
@@ -63,7 +75,6 @@ function removeGroup(index) {
     renderGroups();
 }
 
-// 更新分组数据
 function updateGroup(index, field, value) {
     if (field === 'wells') {
         value = parseFloat(value);
@@ -72,11 +83,10 @@ function updateGroup(index, field, value) {
     groups[index][field] = value;
 }
 
-// 计算主函数
 function calculate() {
-    // 获取当前设置的体积参数
+    // 1. Get Settings
     const settings = {
-        name: document.getElementById('plateType').options[document.getElementById('plateType').selectedIndex].text.split('(')[0].trim(),
+        name: document.getElementById('plateType').options[document.getElementById('plateType').selectedIndex].text,
         optiA: parseFloat(document.getElementById('volOptiA').value) || 0,
         lipo: parseFloat(document.getElementById('volLipo').value) || 0,
         optiB: parseFloat(document.getElementById('volOptiB').value) || 0,
@@ -85,12 +95,11 @@ function calculate() {
 
     const groupExtra = parseFloat(document.getElementById('groupExtraWells').value) || 0;
     const tubeAExtra = parseFloat(document.getElementById('extraWells').value) || 0;
-    
-    // 1. 计算每个组需要的配制量 = 实际孔数 + 分组富裕量
+
+    // 2. Logic
     let totalWellsForTubeA = 0;
-    
-    const groupCalculations = groups.map(group => {
-        const calcWells = group.wells + groupExtra; // 每个组配制量 = 实际 + Group富裕
+    const groupResults = groups.map(group => {
+        const calcWells = group.wells + groupExtra; 
         totalWellsForTubeA += calcWells;
         
         return {
@@ -101,10 +110,7 @@ function calculate() {
         };
     });
 
-    // 2. 计算 Tube A 总量
-    // Tube A 总需求 = Sum(各个 Tube B 的孔数需求) + Tube A 自身富裕量
     const finalTubeAWells = totalWellsForTubeA + tubeAExtra;
-    
     const tubeA = {
         totalWells: finalTubeAWells,
         optiA: finalTubeAWells * settings.optiA,
@@ -112,152 +118,108 @@ function calculate() {
         totalVol: finalTubeAWells * (settings.optiA + settings.lipo)
     };
 
-    // 3. 渲染结果
-    displayResults(settings, tubeA, groupCalculations, groupExtra, tubeAExtra);
+    // 3. Render
+    renderResults(settings, tubeA, groupResults, groupExtra, tubeAExtra);
 }
 
-function displayResults(settings, tubeA, groupResults, groupExtra, tubeAExtra) {
-    const resultSection = document.getElementById('resultSection');
-    resultSection.style.display = 'block';
-    
+function renderResults(settings, tubeA, groupResults, groupExtra, tubeAExtra) {
+    // Show sections
+    document.getElementById('resultPlaceholder').style.display = 'none';
+    document.getElementById('resultContent').style.display = 'block';
+
+    // Summary
     const totalActual = groupResults.reduce((sum, g) => sum + g.wells, 0);
+    document.getElementById('summaryText').innerText = 
+        `共 ${groupResults.length} 组，实际 ${totalActual} 孔（A管富余 +${tubeAExtra}，分组富余 +${groupExtra}）`;
 
-    // 摘要
-    document.getElementById('summaryText').textContent = 
-        `${settings.name} | 实际孔数:${totalActual} | 分组富裕:+${groupExtra}孔/组 | A管富裕:+${tubeAExtra}孔`;
-
-    // Tube A
-    const totalActualWells = groupResults.reduce((sum, g) => sum + g.wells, 0);
-    const totalGroupExtra = groupResults.length * groupExtra;
-
-    const tubeAHtml = `
-        <table class="recipe-table">
-            <tr>
-                <th>试剂</th>
-                <th>单孔量</th>
-                <th>总配制量 (共满足 ${formatNum(tubeA.totalWells)} 孔份量)</th>
-            </tr>
-            <tr>
-                <td>Opti-MEM</td>
-                <td>${settings.optiA} µL</td>
-                <td class="highlight">${formatNum(tubeA.optiA)} µL</td>
-            </tr>
-            <tr>
-                <td>Lipofectamine 3000</td>
-                <td>${settings.lipo} µL</td>
-                <td class="highlight">${formatNum(tubeA.lipo)} µL</td>
-            </tr>
-            <tr>
-                <td><strong>A管总计</strong></td>
-                <td>${settings.optiA + settings.lipo} µL</td>
-                <td><strong>${formatNum(tubeA.totalVol)} µL</strong></td>
-            </tr>
-        </table>
-        <div style="margin-top:15px; background:#f8f9fa; padding:10px; border-radius:4px; border-left: 3px solid #2ecc71; font-size: 0.9em; color:#555;">
-            <strong><i class="fas fa-calculator"></i> A 管配制量构成 (已自动包含所有需求):</strong><br>
-            <div style="padding-left: 10px; margin-top: 5px; line-height: 1.6;">
-                1. 实际实验所需: <strong>${formatNum(totalActualWells)}</strong> 孔<br>
-                2. 满足各组富裕: ${groupResults.length}个组 × ${groupExtra} = <strong>${formatNum(totalGroupExtra)}</strong> 孔 (确保每个B管都够分)<br>
-                3. A 管自身富裕: <strong>${tubeAExtra}</strong> 孔 (确保A管分液时有余量)<br>
-                <div style="border-top:1px solid #ddd; margin-top:5px; padding-top:2px;">
-                    <strong>总计算基数: ${formatNum(totalActualWells)} + ${formatNum(totalGroupExtra)} + ${tubeAExtra} = <span style="color:#e74c3c; font-size:1.1em;">${formatNum(tubeA.totalWells)}</span> 孔</strong>
-                </div>
-            </div>
-        </div>
+    // Tube A Table
+    const tubeATable = `
+        <tr>
+            <td>Opti-MEM</td>
+            <td>${settings.optiA} µL</td>
+            <td class="val-highlight">${formatNum(tubeA.optiA)} µL</td>
+        </tr>
+        <tr>
+            <td>Lipofectamine 3000</td>
+            <td>${settings.lipo} µL</td>
+            <td class="val-highlight">${formatNum(tubeA.lipo)} µL</td>
+        </tr>
+        <tr style="background-color: #f8fafc; font-weight:600;">
+            <td>总体积</td>
+            <td>-</td>
+            <td>${formatNum(tubeA.totalVol)} µL</td>
+        </tr>
     `;
-    document.getElementById('tubeAContent').innerHTML = tubeAHtml;
+    document.getElementById('tubeABody').innerHTML = tubeATable;
 
     // Tube B List
     let tubeBHtml = '';
     groupResults.forEach(group => {
         const volFromA = group.calcWells * (settings.optiA + settings.lipo);
-        const actualVol = group.wells * (settings.optiA + settings.lipo + settings.optiB + settings.sirna);
-
         tubeBHtml += `
-            <div style="margin-bottom: 20px; border-bottom: 1px dashed #eee; padding-bottom: 15px;">
-                <h5 style="margin-bottom:8px; color:#2980b9; font-size:1.1em;">
-                    <i class="fas fa-tag"></i> ${group.name} 
-                    <span style="font-size:0.8em; color:#777; font-weight:normal;">
-                        (实际用 ${group.wells} 孔, 配制 ${formatNum(group.calcWells)} 孔)
-                    </span>
-                </h5>
-                <table class="recipe-table">
+            <div class="group-card">
+                <div class="group-card-header">
+                    <span>${group.name}</span>
+                    <span style="font-weight:400; font-size:0.9em; color:var(--text-muted);">${group.wells}孔 (配${formatNum(group.calcWells)})</span>
+                </div>
+                <table class="data-table" style="font-size:0.85rem;">
                     <tr>
-                        <th width="40%">成分</th>
-                        <th>加入量</th>
-                        <th>操作</th>
+                        <td width="50%">Opti-MEM</td>
+                        <td class="val-highlight">${formatNum(group.optiB)} µL</td>
                     </tr>
                     <tr>
-                        <td>Opti-MEM</td>
-                        <td class="highlight">${formatNum(group.optiB)} µL</td>
-                        <td>加入空离心管</td>
+                        <td>siRNA</td>
+                        <td class="val-highlight">${formatNum(group.sirna)} µL</td>
                     </tr>
-                    <tr>
-                        <td>${group.name} siRNA</td>
-                        <td class="highlight">${formatNum(group.sirna)} µL</td>
-                        <td>加入并混匀</td>
-                    </tr>
-                    <tr style="background:#f0f9ff;">
-                        <td>+ 来自 A 管的混合液</td>
-                        <td class="highlight">${formatNum(volFromA)} µL</td>
-                        <td>取 A 管液加入此管</td>
+                    <tr style="color:var(--primary);">
+                        <td>加入 A 管混合液</td>
+                        <td class="val-highlight">${formatNum(volFromA)} µL</td>
                     </tr>
                 </table>
-                 <p style="margin-top:5px; font-size: 0.8em; color:#999;">
-                    <i class="fas fa-info-circle"></i> 配制总量: ${formatNum(group.calcWells * (settings.optiA + settings.lipo + settings.optiB + settings.sirna))} µL (每孔加样约 ${formatNum(settings.optiA + settings.lipo + settings.optiB + settings.sirna)} µL)
-                </p>
             </div>
         `;
     });
-    document.getElementById('tubeBList').innerHTML = tubeBHtml;
+    document.getElementById('tubeBContainer').innerHTML = tubeBHtml;
 
-    // Generate Protocol Text
-    generateProtocol(settings, tubeA, groupResults);
+    // Protocol Text
+    generateProtocolText(settings, tubeA, groupResults);
 }
 
-function generateProtocol(settings, tubeA, groupResults) {
-    const date = new Date().toLocaleDateString();
-    let text = `实验流程单 - siRNA 转染 (${settings.name})\n`;
-    text += `日期: ${date}\n`;
-    text += `----------------------------------------\n`;
-    text += `1. 准备试管 A (Lipofectamine 3000 Master Mix):\n`;
-    text += `   - 取一只 1.5mL EP 管，标记为 "Tube A"\n`;
-    text += `   - 加入 Opti-MEM: ${formatNum(tubeA.optiA)} µL\n`;
-    text += `   - 加入 Lipofectamine 3000: ${formatNum(tubeA.lipo)} µL\n`;
-    text += `   - 轻轻混匀 (Vortex 2-3秒 或 弹击管壁)\n\n`;
+function generateProtocolText(settings, tubeA, groupResults) {
+    const date = new Date().toLocaleDateString('zh-CN');
+    let text = `实验：siRNA 转染 | ${date}\n`;
+    text += `体系：${settings.name}\n\n`;
+    text += `[1. A 管混合液]\n`;
+    text += `  - Opti-MEM：     ${formatNum(tubeA.optiA)} µL\n`;
+    text += `  - Lipo3000：     ${formatNum(tubeA.lipo)} µL\n`;
+    text += `  - 总体积：       ${formatNum(tubeA.totalVol)} µL（轻轻混匀）\n\n`;
 
-    text += `2. 准备试管 B (各个 siRNA 分组):\n`;
-    groupResults.forEach(group => {
-        text += `   [分组: ${group.name}]\n`;
-        text += `   - 取管，加入 Opti-MEM: ${formatNum(group.optiB)} µL\n`;
-        text += `   - 加入 ${group.name} siRNA: ${formatNum(group.sirna)} µL\n`;
-        text += `   - 轻轻混匀\n`; 
+    text += `[2. 各组 B 管配制]\n`;
+    groupResults.forEach(g => {
+        text += `  > 分组：${g.name}\n`;
+        text += `    - Opti-MEM：  ${formatNum(g.optiB)} µL\n`;
+        text += `    - siRNA：     ${formatNum(g.sirna)} µL\n`;
+        const volFromA = g.calcWells * (settings.optiA + settings.lipo);
+        text += `    - 加入 A 管： ${formatNum(volFromA)} µL\n`;
+        text += `    - 轻轻混匀，室温静置 10-15 分钟\n\n`;
     });
-    text += `\n`;
+    
+    const finalVol = (settings.optiA + settings.lipo) + (settings.optiB + settings.sirna);
+    text += `[3. 加入细胞]\n`;
+    text += `  - 每孔加入转染复合物 ${formatNum(finalVol)} µL\n`;
 
-    text += `3. 混合转染复合物:\n`;
-    groupResults.forEach(group => {
-        const volFromA = group.calcWells * (settings.optiA + settings.lipo);
-        text += `   - 向 [${group.name}] 管中加入 Tube A 溶液: ${formatNum(volFromA)} µL\n`;
-    });
-    text += `   - 充分混匀，室温孵育 10-15 分钟。\n\n`;
-
-    text += `4. 加样:\n`;
-    const finalVolPerWell = (settings.optiA + settings.lipo) + (settings.optiB + settings.sirna);
-    text += `   - 每孔滴加转染复合物: ${formatNum(finalVolPerWell)} µL\n`;
-    text += `   - 轻轻摇晃培养板混匀，放回培养箱。\n`;
-
-    document.getElementById('protocolText').value = text;
+    document.getElementById('protocolText').innerText = text;
 }
 
 function formatNum(num) {
-    // 避免出现 125.00000001 这种精度问题; 若是整数显示整数，否则1位小数
     return parseFloat(num.toFixed(1));
 }
 
 function copyProtocol() {
-    const copyText = document.getElementById("protocolText");
-    copyText.select();
-    document.execCommand("copy");
-    alert("流程已复制到剪贴板！");
+    const text = document.getElementById('protocolText').innerText;
+    if(!text) return;
+    navigator.clipboard.writeText(text).then(() => {
+        // Could show a toast here
+        alert("已复制到剪贴板");
+    });
 }

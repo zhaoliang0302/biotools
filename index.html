@@ -5,117 +5,152 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>分子生物学实验助手</title>
     <link rel="stylesheet" href="style.css">
-    <!-- FontAwesome for icons -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 <body>
     <div class="container">
-        <h1>🧬 分子生物学实验助手</h1>
-        
-        <div class="tool-card">
-            <div class="tool-header">
-                <h2><i class="fas fa-vial"></i> 工具一：转染 siRNA 配置计算</h2>
-                <p class="subtitle">适用于 Lipofectamine 3000 转染体系</p>
-            </div>
-            
-            <div class="configuration-section">
-                <!-- 基础设置 -->
-                <div class="settings-row" style="grid-template-columns: 1fr;">
-                    <div class="input-group">
-                        <label><i class="fas fa-flask"></i> 预设体系标准 (加载预设)</label>
-                        <select id="plateType" onchange="loadPreset()">
-                            <option value="6well">六孔板规格 (6-well)</option>
-                            <option value="60mm">中皿规格 (60mm Dish)</option>
-                        </select>
-                    </div>
+        <header>
+            <h1><i class="fas fa-dna" style="color: var(--primary);"></i> 实验配置助手</h1>
+            <p>Lipofectamine 3000 siRNA 转染体系计算</p>
+        </header>
+
+        <div class="app-grid">
+            <!-- Left Column: Configuration -->
+            <section class="card">
+                <div class="card-header">
+                    <div class="card-title"><i class="fas fa-sliders-h"></i> 实验参数</div>
                 </div>
 
-                <!-- 自定义体积设置 -->
-                <div class="settings-row volumes-row" style="background: #f8f9fa; padding: 15px; border-radius: 8px; border: 1px solid #eee; margin-bottom: 20px;">
-                    <div class="volume-group">
-                        <label class="sub-label">试管 A (每孔)</label>
-                        <div class="double-input">
-                            <div class="v-input">
-                                <span>Opti-MEM (µL)</span>
-                                <input type="number" id="volOptiA" value="125" step="1">
-                            </div>
-                            <div class="v-input">
-                                <span>Lipo3000 (µL)</span>
-                                <input type="number" id="volLipo" value="5" step="0.1">
-                            </div>
-                        </div>
-                    </div>
-                    <div class="volume-group">
-                        <label class="sub-label">试管 B (每孔)</label>
-                        <div class="double-input">
-                            <div class="v-input">
-                                <span>Opti-MEM (µL)</span>
-                                <input type="number" id="volOptiB" value="125" step="1">
-                            </div>
-                            <div class="v-input">
-                                <span>siRNA (µL)</span>
-                                <input type="number" id="volSiRNA" value="5" step="0.1">
-                            </div>
-                        </div>
-                    </div>
+                <!-- Standard Selection -->
+                <div class="form-group">
+                    <label>实验规格（加载预设）</label>
+                    <select id="plateType" onchange="loadPreset()">
+                        <option value="6well">六孔板</option>
+                        <option value="60mm">60mm 培养皿</option>
+                    </select>
                 </div>
+
+                <div class="section-title">单孔体系定义</div>
                 
-                <div class="settings-row">
-                    <div class="input-group">
-                        <label><i class="fas fa-plus-circle"></i> 分组富裕量 (每组额外孔数)</label>
-                        <div class="tooltip-input">
-                            <input type="number" id="groupExtraWells" value="0.2" step="0.1" min="0">
-                            <span class="tooltip">Tube B 配制富裕：防止加样到孔里时不够 (推荐 0-0.5)</span>
+                <div class="volume-grid">
+                    <div class="vol-box">
+                        <h4><span class="tag tag-a">A 管</span> Lipo 稀释液</h4>
+                        <label class="input-label-small">Opti-MEM</label>
+                        <div class="input-with-unit">
+                            <input type="number" id="volOptiA" step="1">
+                            <span>µL</span>
+                        </div>
+                        <label class="input-label-small">Lipo3000</label>
+                        <div class="input-with-unit">
+                            <input type="number" id="volLipo" step="0.1">
+                            <span>µL</span>
                         </div>
                     </div>
-                    
-                    <div class="input-group">
-                        <label><i class="fas fa-plus-circle"></i> 试管 A 富裕量 (总管额外孔数)</label>
-                        <div class="tooltip-input">
-                            <input type="number" id="extraWells" value="0.5" step="0.1" min="0">
-                            <span class="tooltip">Tube A 配制富裕：防止分装到 B 管时不够 (推荐 0.5-1)</span>
+                    <div class="vol-box">
+                        <h4><span class="tag tag-b">B 管</span> siRNA 稀释液</h4>
+                        <label class="input-label-small">Opti-MEM</label>
+                        <div class="input-with-unit">
+                            <input type="number" id="volOptiB" step="1">
+                            <span>µL</span>
+                        </div>
+                        <label class="input-label-small">siRNA</label>
+                        <div class="input-with-unit">
+                            <input type="number" id="volSiRNA" step="0.1">
+                            <span>µL</span>
                         </div>
                     </div>
                 </div>
 
-                <!-- 分组设置 -->
-                <div class="groups-section">
-                    <h3><i class="fas fa-list-ul"></i> 实验分组设置</h3>
-                    <div id="groupsList" class="groups-list">
-                        <!-- 动态生成的组 -->
+                <div class="section-title">安全富余量（移液损耗）</div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                    <div class="form-group">
+                        <label style="font-size: 0.85rem;">分组配制富余 (每组+N孔)</label>
+                        <div class="tooltip-container">
+                            <input type="number" id="groupExtraWells" value="0.4" step="0.1" min="0">
+                            <span class="tooltip-text">防止加样到孔里时不够 (推荐 0.2-0.5)</span>
+                        </div>
                     </div>
-                    <button class="btn-add" onclick="addGroup()"><i class="fas fa-plus"></i> 添加分组</button>
+                    <div class="form-group">
+                        <label style="font-size: 0.85rem;">A 管总配制富余 (+N孔)</label>
+                        <div class="tooltip-container">
+                            <input type="number" id="extraWells" value="0.8" step="0.1" min="0">
+                            <span class="tooltip-text">防止分装到 B 管时不够 (推荐 0.5-1.0)</span>
+                        </div>
+                    </div>
                 </div>
 
-                <button class="btn-calculate" onclick="calculate()"><i class="fas fa-calculator"></i> 生成配置方案</button>
-            </div>
-            
-            <!-- 结果展示 -->
-            <div id="resultSection" class="result-section" style="display: none;">
-                <h3><i class="fas fa-clipboard-check"></i> 配置方案</h3>
-                
-                <div class="summary-box">
-                    <p><strong>当前设定：</strong><span id="summaryText"></span></p>
+                <div class="section-title">分组设置</div>
+                <div id="groupsList" class="group-list">
+                    <!-- Groups injected by JS -->
+                </div>
+                <button class="btn-add" onclick="addGroup()"><i class="fas fa-plus"></i> 添加新分组</button>
+
+                <button class="btn-primary" onclick="calculate()">
+                        <i class="fas fa-calculator"></i> 生成方案
+                    </button>
+            </section>
+
+            <!-- Right Column: Results -->
+            <section class="card" id="resultContainer">
+                <div class="card-header">
+                    <div class="card-title"><i class="fas fa-clipboard-list"></i> 配制方案</div>
+                    <button class="btn-icon" onclick="copyProtocol()" title="复制文本" style="font-size: 1rem;"><i class="far fa-copy"></i></button>
                 </div>
 
-                <div class="recipe-card">
-                    <h4><span class="tag tag-a">试管 A</span> Lipo3000 混合液 (共用)</h4>
-                    <p class="desc">所有分组共用的转染试剂混合液。配制完成后，分装到各 B 管中，或分别加入各 B 管。</p>
-                    <div class="recipe-content" id="tubeAContent"></div>
+                <div id="resultPlaceholder" class="result-empty">
+                    <i class="fas fa-flask"></i>
+                    <p>设置参数并点击“生成方案”<br>查看详细的配液指南</p>
                 </div>
 
-                <div class="recipe-card">
-                    <h4><span class="tag tag-b">试管 B</span> siRNA 稀释液 (分管)</h4>
-                    <p class="desc">每个分组对应一个 B 管。将 siRNA 稀释在 Opti-MEM 中。</p>
-                    <div id="tubeBList"></div>
-                </div>
+                <div id="resultContent" class="result-content" style="display: none;">
+                    <div class="summary-badge">
+                        <i class="fas fa-info-circle"></i>
+                        <span id="summaryText">摘要信息...</span>
+                    </div>
 
-                <div class="protocol-section">
-                    <h4><i class="fas fa-file-alt"></i> 实验流程 (可复制)</h4>
-                    <textarea id="protocolText" readonly></textarea>
-                    <button class="btn-copy" onclick="copyProtocol()">复制流程</button>
+                    <!-- Tube A Recipe -->
+                    <div class="recipe-block">
+                        <div class="recipe-header">
+                            <h3>1. 配制 A 管（共用混合液）</h3>
+                            <span class="tag tag-a">共用混合液</span>
+                        </div>
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>成分</th>
+                                    <th>单孔量</th>
+                                    <th>总配制量</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tubeABody">
+                                <!-- JS Injected -->
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Tube B List -->
+                    <div class="recipe-block">
+                        <div class="recipe-header">
+                            <h3>2. 配制 B 管（各组分装）</h3>
+                            <span class="tag tag-b">按组配制</span>
+                        </div>
+                        <div id="tubeBContainer">
+                            <!-- JS Injected -->
+                        </div>
+                    </div>
+
+                    <!-- Protocol Text -->
+                    <div class="recipe-block">
+                        <div class="recipe-header" style="border:none; margin-bottom:0;">
+                            <h3><i class="fas fa-code"></i> 实验记录文本</h3>
+                        </div>
+                        <div class="protocol-box">
+                            <button class="btn-copy" onclick="copyProtocol()">复制</button>
+                            <div id="protocolText"></div>
+                        </div>
+                    </div>
                 </div>
-            </div>
+            </section>
         </div>
     </div>
 
