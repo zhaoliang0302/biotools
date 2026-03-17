@@ -18,7 +18,22 @@ let groups = [
 document.addEventListener('DOMContentLoaded', () => {
     loadPreset();
     renderGroups();
+    bindTabs();
 });
+
+function bindTabs() {
+    const tabButtons = document.querySelectorAll('.tab-btn');
+    tabButtons.forEach(btn => {
+        btn.addEventListener('click', () => {
+            tabButtons.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            const target = btn.getAttribute('data-target');
+            document.querySelectorAll('.module').forEach(module => {
+                module.classList.toggle('active', module.id === target);
+            });
+        });
+    });
+}
 
 function loadPreset() {
     const type = document.getElementById('plateType').value;
@@ -220,6 +235,170 @@ function copyProtocol() {
     if(!text) return;
     navigator.clipboard.writeText(text).then(() => {
         // Could show a toast here
+        alert("已复制到剪贴板");
+    });
+}
+
+function calculateTic() {
+    const wells = parseFloat(document.getElementById('ticWells').value) || 0;
+    const extraWells = parseFloat(document.getElementById('ticExtraWells').value) || 0;
+    const volPerWell = parseFloat(document.getElementById('ticVolPerWell').value) || 0;
+
+    const tnfStock = parseFloat(document.getElementById('ticTnfStock').value) || 0;
+    const il1Stock = parseFloat(document.getElementById('ticIl1Stock').value) || 0;
+    const c1qStockMg = parseFloat(document.getElementById('ticC1qStock').value) || 0;
+
+    const tnfWork = parseFloat(document.getElementById('ticTnfWork').value) || 0;
+    const il1Work = parseFloat(document.getElementById('ticIl1Work').value) || 0;
+    const c1qWork = parseFloat(document.getElementById('ticC1qWork').value) || 0;
+
+    if (wells <= 0 || volPerWell <= 0) {
+        alert('请输入有效的孔数和每孔体积。');
+        return;
+    }
+    if (tnfStock <= 0 || il1Stock <= 0 || c1qStockMg <= 0) {
+        alert('请输入有效的母液浓度。');
+        return;
+    }
+    if (tnfWork < 0 || il1Work < 0 || c1qWork < 0) {
+        alert('请输入有效的工作浓度。');
+        return;
+    }
+
+    const totalWells = wells + extraWells;
+    const totalVolMl = totalWells * volPerWell;
+
+    const c1qStockNg = c1qStockMg * 1000000;
+    const tnfVolMl = (tnfWork / tnfStock) * totalVolMl;
+    const il1VolMl = (il1Work / il1Stock) * totalVolMl;
+    const c1qVolMl = (c1qWork / c1qStockNg) * totalVolMl;
+    let mediumVolMl = totalVolMl - tnfVolMl - il1VolMl - c1qVolMl;
+    if (mediumVolMl < -1e-6) {
+        alert('工作浓度过高，培养基体积为负，请检查参数。');
+        return;
+    }
+    if (mediumVolMl < 0) mediumVolMl = 0;
+
+    const mix = {
+        totalWells,
+        totalVolMl,
+        tnfVolMl,
+        il1VolMl,
+        c1qVolMl,
+        mediumVolMl
+    };
+
+    renderTicResults(mix);
+}
+
+function renderTicResults(mix) {
+    document.getElementById('ticResultPlaceholder').style.display = 'none';
+    document.getElementById('ticResultContent').style.display = 'block';
+
+    document.getElementById('ticSummaryText').innerText =
+        `实际 ${mix.totalWells} 孔，总体积 ${formatMl(mix.totalVolMl)} mL（含富余）`;
+
+    const rows = [
+        { name: '培养基', vol: mix.mediumVolMl },
+        { name: 'TNF', vol: mix.tnfVolMl },
+        { name: 'IL-1α', vol: mix.il1VolMl },
+        { name: 'C1q', vol: mix.c1qVolMl }
+    ];
+
+    document.getElementById('ticMixBody').innerHTML = rows.map(item => {
+        const formatted = formatVol(item.vol);
+        return `
+            <tr>
+                <td>${item.name}</td>
+                <td class="val-highlight">${formatted}</td>
+            </tr>
+        `;
+    }).join('');
+
+    const tubePlan = buildTubePlan(mix.totalVolMl);
+    document.getElementById('ticTubeSuggestion').innerHTML = tubePlan.summary;
+    document.getElementById('ticPerTubeBody').innerHTML = buildPerTubeRows(mix, tubePlan);
+
+    generateTicProtocolText(mix, tubePlan);
+}
+
+function buildTubePlan(totalVolMl) {
+    const tubeSize = chooseTubeSize(totalVolMl);
+    const tubeCount = Math.ceil(totalVolMl / tubeSize);
+    const perTube = totalVolMl / tubeCount;
+    const summary = tubeCount === 1
+        ? `建议使用 ${tubeSize} mL 管 1 支（总体积 ${formatMl(totalVolMl)} mL）`
+        : `建议分成 ${tubeCount} 个 ${tubeSize} mL 管，每管约 ${formatMl(perTube)} mL（同规格分装）`;
+    return { tubeSize, tubeCount, perTube, summary };
+}
+
+function chooseTubeSize(totalVolMl) {
+    const sizes = [1.5, 5, 10, 15, 50];
+    let bestSize = sizes[sizes.length - 1];
+    let bestCount = Infinity;
+    sizes.forEach(size => {
+        const count = Math.ceil(totalVolMl / size);
+        if (count < bestCount) {
+            bestCount = count;
+            bestSize = size;
+        }
+    });
+    return bestSize;
+}
+
+function buildPerTubeRows(mix, tubePlan) {
+    const factor = tubePlan.perTube / mix.totalVolMl;
+    const rows = [
+        { name: '培养基', vol: mix.mediumVolMl * factor },
+        { name: 'TNF', vol: mix.tnfVolMl * factor },
+        { name: 'IL-1α', vol: mix.il1VolMl * factor },
+        { name: 'C1q', vol: mix.c1qVolMl * factor }
+    ];
+    return rows.map(item => {
+        return `
+            <tr>
+                <td>${item.name}</td>
+                <td class="val-highlight">${formatVol(item.vol)}</td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function generateTicProtocolText(mix, tubePlan) {
+    const date = new Date().toLocaleDateString('zh-CN');
+    let text = `实验：TIC 配制 | ${date}\n`;
+    text += `孔数（含富余）：${mix.totalWells}\n`;
+    text += `总体积：${formatMl(mix.totalVolMl)} mL\n\n`;
+    text += `[TIC 混合液]\n`;
+    text += `  - 培养基： ${formatVol(mix.mediumVolMl)}\n`;
+    text += `  - TNF：   ${formatVol(mix.tnfVolMl)}\n`;
+    text += `  - IL-1α： ${formatVol(mix.il1VolMl)}\n`;
+    text += `  - C1q：   ${formatVol(mix.c1qVolMl)}\n`;
+    text += `\n[管子建议]\n  - ${tubePlan.summary}\n`;
+    if (tubePlan.tubeCount > 1) {
+        text += `\n[每管配制量]\n`;
+        text += `  - 培养基： ${formatVol(mix.mediumVolMl * (tubePlan.perTube / mix.totalVolMl))}\n`;
+        text += `  - TNF：   ${formatVol(mix.tnfVolMl * (tubePlan.perTube / mix.totalVolMl))}\n`;
+        text += `  - IL-1α： ${formatVol(mix.il1VolMl * (tubePlan.perTube / mix.totalVolMl))}\n`;
+        text += `  - C1q：   ${formatVol(mix.c1qVolMl * (tubePlan.perTube / mix.totalVolMl))}\n`;
+    }
+    document.getElementById('ticProtocolText').innerText = text;
+}
+
+function formatMl(num) {
+    return parseFloat(num.toFixed(3));
+}
+
+function formatVol(ml) {
+    const mlVal = formatMl(ml);
+    const ulVal = parseFloat((ml * 1000).toFixed(1));
+    return `${mlVal} mL (${ulVal} µL)`;
+}
+
+function copyTicProtocol() {
+    const text = document.getElementById('ticProtocolText').innerText;
+    if(!text) return;
+    navigator.clipboard.writeText(text).then(() => {
         alert("已复制到剪贴板");
     });
 }

@@ -11,12 +11,18 @@
     <div class="container">
         <header>
             <h1><i class="fas fa-dna" style="color: var(--primary);"></i> 实验配置助手</h1>
-            <p>Lipofectamine 3000 siRNA 转染体系计算</p>
+            <p>转染与诱导体系一站式计算</p>
         </header>
 
-        <div class="app-grid">
-            <!-- Left Column: Configuration -->
-            <section class="card">
+        <div class="tabs">
+            <button class="tab-btn active" data-target="module-lipo"><i class="fas fa-vial"></i> Lipo3000 转染</button>
+            <button class="tab-btn" data-target="module-tic"><i class="fas fa-flask"></i> TIC 配置</button>
+        </div>
+
+        <div id="module-lipo" class="module active">
+            <div class="app-grid">
+                <!-- Left Column: Configuration -->
+                <section class="card">
                 <div class="card-header">
                     <div class="card-title"><i class="fas fa-sliders-h"></i> 实验参数</div>
                 </div>
@@ -151,6 +157,159 @@
                     </div>
                 </div>
             </section>
+            </div>
+        </div>
+
+        <div id="module-tic" class="module">
+            <div class="app-grid">
+                <section class="card">
+                    <div class="card-header">
+                        <div class="card-title"><i class="fas fa-sliders-h"></i> TIC 参数</div>
+                    </div>
+
+                    <div class="section-title">母液浓度</div>
+                    <div class="volume-grid">
+                        <div class="vol-box">
+                            <label class="input-label-small">TNF (ng/mL)</label>
+                            <div class="input-with-unit">
+                                <input type="number" id="ticTnfStock" value="2500" step="10" min="0">
+                                <span>ng/mL</span>
+                            </div>
+                            <label class="input-label-small">IL-1α (ng/mL)</label>
+                            <div class="input-with-unit">
+                                <input type="number" id="ticIl1Stock" value="2500" step="10" min="0">
+                                <span>ng/mL</span>
+                            </div>
+                        </div>
+                        <div class="vol-box">
+                            <label class="input-label-small">C1q (mg/mL)</label>
+                            <div class="input-with-unit">
+                                <input type="number" id="ticC1qStock" value="1.04" step="0.01" min="0">
+                                <span>mg/mL</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="section-title">工作浓度</div>
+                    <div class="volume-grid">
+                        <div class="vol-box">
+                            <label class="input-label-small">TNF (ng/mL)</label>
+                            <div class="input-with-unit">
+                                <input type="number" id="ticTnfWork" value="30" step="1" min="0">
+                                <span>ng/mL</span>
+                            </div>
+                            <label class="input-label-small">IL-1α (ng/mL)</label>
+                            <div class="input-with-unit">
+                                <input type="number" id="ticIl1Work" value="3" step="0.1" min="0">
+                                <span>ng/mL</span>
+                            </div>
+                        </div>
+                        <div class="vol-box">
+                            <label class="input-label-small">C1q (ng/mL)</label>
+                            <div class="input-with-unit">
+                                <input type="number" id="ticC1qWork" value="400" step="10" min="0">
+                                <span>ng/mL</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="section-title">培养体系</div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                        <div class="form-group">
+                            <label>需要孔数</label>
+                            <input type="number" id="ticWells" value="6" min="1" step="1">
+                        </div>
+                        <div class="form-group">
+                            <label>每孔体积</label>
+                            <div class="input-with-unit">
+                                <input type="number" id="ticVolPerWell" value="2" min="0.1" step="0.1">
+                                <span>mL</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>富余孔数</label>
+                        <input type="number" id="ticExtraWells" value="1" min="0" step="1">
+                    </div>
+
+                    <button class="btn-primary" onclick="calculateTic()">
+                        <i class="fas fa-calculator"></i> 生成方案
+                    </button>
+                </section>
+
+                <section class="card" id="ticResultContainer">
+                    <div class="card-header">
+                        <div class="card-title"><i class="fas fa-clipboard-list"></i> TIC 配制方案</div>
+                        <button class="btn-icon" onclick="copyTicProtocol()" title="复制文本" style="font-size: 1rem;"><i class="far fa-copy"></i></button>
+                    </div>
+
+                    <div id="ticResultPlaceholder" class="result-empty">
+                        <i class="fas fa-flask"></i>
+                        <p>设置参数并点击“生成方案”<br>查看 TIC 配液结果</p>
+                    </div>
+
+                    <div id="ticResultContent" class="result-content" style="display: none;">
+                        <div class="summary-badge">
+                            <i class="fas fa-info-circle"></i>
+                            <span id="ticSummaryText">摘要信息...</span>
+                        </div>
+
+                        <div class="recipe-block">
+                            <div class="recipe-header">
+                                <h3>1. TIC 混合液配制</h3>
+                                <span class="tag tag-a">总体系</span>
+                            </div>
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>成分</th>
+                                        <th>加入量</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="ticMixBody">
+                                    <!-- JS Injected -->
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <div class="recipe-block">
+                            <div class="recipe-header">
+                                <h3>2. 管子建议</h3>
+                                <span class="tag tag-b">分装提示</span>
+                            </div>
+                            <div id="ticTubeSuggestion" class="group-card" style="margin-bottom:0;"></div>
+                        </div>
+
+                        <div class="recipe-block">
+                            <div class="recipe-header">
+                                <h3>3. 每管配制量</h3>
+                                <span class="tag tag-b">同规格分装</span>
+                            </div>
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>成分</th>
+                                        <th>每管加入量</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="ticPerTubeBody">
+                                    <!-- JS Injected -->
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <div class="recipe-block">
+                            <div class="recipe-header" style="border:none; margin-bottom:0;">
+                                <h3><i class="fas fa-code"></i> 实验记录文本</h3>
+                            </div>
+                            <div class="protocol-box">
+                                <button class="btn-copy" onclick="copyTicProtocol()">复制</button>
+                                <div id="ticProtocolText"></div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </div>
         </div>
     </div>
 
