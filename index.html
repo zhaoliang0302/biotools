@@ -366,7 +366,11 @@
                 <section class="card" id="qpcrResultContainer">
                     <div class="card-header">
                         <div class="card-title"><i class="fas fa-clipboard-list"></i> qPCR 方案</div>
-                        <button class="btn-icon" onclick="copyQpcrProtocol()" title="复制文本" style="font-size: 1rem;"><i class="far fa-copy"></i></button>
+                        <div class="header-actions">
+                            <button class="btn-icon btn-icon-neutral" onclick="copyQpcrProtocol()" title="复制实验记录" style="font-size: 1rem;"><i class="far fa-copy"></i></button>
+                            <button class="btn-icon btn-icon-neutral" onclick="downloadQpcrProtocolTxt()" title="下载 TXT 记录" style="font-size: 1rem;"><i class="fas fa-download"></i></button>
+                            <button class="btn-icon btn-icon-neutral" onclick="downloadQpcrPrintHtml()" title="下载打印版" style="font-size: 1rem;"><i class="fas fa-print"></i></button>
+                        </div>
                     </div>
 
                     <div id="qpcrResultPlaceholder" class="result-empty">
@@ -429,7 +433,6 @@
                                 <h3><i class="fas fa-code"></i> 实验记录文本</h3>
                             </div>
                             <div class="protocol-box">
-                                <button class="btn-copy" onclick="copyQpcrProtocol()">复制</button>
                                 <div id="qpcrProtocolText"></div>
                             </div>
                         </div>

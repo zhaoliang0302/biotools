@@ -25,6 +25,8 @@ let qpcrGenes = [
     { id: 2, name: 'GeneX' }
 ];
 
+let lastQpcrData = null;
+
 document.addEventListener('DOMContentLoaded', () => {
     loadPreset();
     renderGroups();
@@ -693,6 +695,7 @@ function buildTube2Plans(geneCount, groupsList, replicates, extraWells) {
 }
 
 function renderQpcrResults(data) {
+    lastQpcrData = data;
     document.getElementById('qpcrResultPlaceholder').style.display = 'none';
     document.getElementById('qpcrResultContent').style.display = 'block';
 
@@ -753,8 +756,7 @@ function renderQpcrCalcTable(data) {
 
 function renderQpcrRtTable(rtPlans, dilutionRatio) {
     const head = rtPlans.map(plan => `<th>${plan.group}</th>`).join('');
-    const dilutionTotalVol = 20;
-    const dilutionWaterFor20ul = dilutionRatio > 1 ? dilutionTotalVol * (dilutionRatio - 1) : 0;
+    const dilutionWaterFor20ul = getDilutionWaterFor20ul(dilutionRatio);
     const buildRow = (label, getter, highlight = false) => {
         const cells = rtPlans.map(plan => {
             const val = getter(plan);
@@ -866,6 +868,8 @@ function renderQpcrPlate(design) {
 
 function generateQpcrProtocolText(data) {
     const date = new Date().toLocaleDateString('zh-CN');
+    const dilutionWaterFor20ul = getDilutionWaterFor20ul(data.dilutionRatio);
+    const wellRows = getQpcrWellRows(data.design);
     let text = `实验：qPCR 配置 | ${date}\n`;
     text += `分组：${data.cleanGroups.map(g => g.name).join('、')}\n`;
     text += `基因：${data.cleanGenes.map(g => g.name).join('、')}\n`;
@@ -880,6 +884,7 @@ function generateQpcrProtocolText(data) {
     text += `  - 每孔 cDNA 含量：${formatQpcr(data.cdnaNgPerWell)} ng\n`;
     text += `  - 推荐稀释倍数：${data.dilutionRatio >= 1 ? `1:${formatQpcr(data.dilutionRatio)}` : `浓度不足（比值 ${formatQpcr(data.dilutionRatio)}）`}\n\n`;
     text += `[3. 逆转录体系配置（20 µL/样品）]\n`;
+    text += `  - cDNA 稀释加无酶水（每 20 µL 稀释液）：${formatQpcr(dilutionWaterFor20ul)} µL\n`;
     data.rtPlans.forEach(plan => {
         text += `  > ${plan.group}\n`;
         text += `    - RNA（${formatQpcr(plan.rnaConc)} ng/µL）：${formatQpcr(plan.rnaVol)} µL\n`;
@@ -909,14 +914,199 @@ function generateQpcrProtocolText(data) {
     text += `  - 步骤1：按基因向对应孔加入 15 µL 管一\n`;
     text += `  - 步骤2：按分组向对应孔加入 5 µL 管二\n`;
     text += `  - 步骤3：轻拍/短暂离心后上机\n`;
+    text += `\n[8. 96 孔板排序（孔位 -> 分组 / 基因 / 平行）]\n`;
+    wellRows.forEach(item => {
+        text += `  - ${item.well} -> ${item.group} / ${item.gene} / Rep${item.rep}\n`;
+    });
 
     document.getElementById('qpcrProtocolText').innerText = text;
 }
 
 function copyQpcrProtocol() {
-    const text = document.getElementById('qpcrProtocolText').innerText;
-    if (!text) return;
+    const text = document.getElementById('qpcrProtocolText').innerText.trim();
+    if (!text) {
+        alert('请先点击“生成方案”。');
+        return;
+    }
     navigator.clipboard.writeText(text).then(() => {
         alert("已复制到剪贴板");
     });
+}
+
+function downloadQpcrProtocolTxt() {
+    const text = document.getElementById('qpcrProtocolText').innerText.trim();
+    if (!text) {
+        alert('请先点击“生成方案”。');
+        return;
+    }
+    downloadBlobFile(getQpcrExportFilename('record', 'txt'), text, 'text/plain;charset=utf-8');
+}
+
+function downloadQpcrPrintHtml() {
+    if (!lastQpcrData) {
+        alert('请先点击“生成方案”。');
+        return;
+    }
+    const html = buildQpcrPrintHtml(lastQpcrData);
+    downloadBlobFile(getQpcrExportFilename('print', 'html'), html, 'text/html;charset=utf-8');
+}
+
+function getDilutionWaterFor20ul(dilutionRatio) {
+    return dilutionRatio > 1 ? 20 * (dilutionRatio - 1) : 0;
+}
+
+function getQpcrWellRows(design) {
+    const rows = [];
+    const rowNames = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
+    for (let rowIndex = 0; rowIndex < 8; rowIndex += 1) {
+        for (let colIndex = 0; colIndex < 12; colIndex += 1) {
+            const cell = design.plate[rowIndex][colIndex];
+            if (!cell) continue;
+            rows.push({
+                well: `${rowNames[rowIndex]}${colIndex + 1}`,
+                group: cell.group,
+                gene: cell.gene,
+                rep: cell.rep
+            });
+        }
+    }
+    return rows;
+}
+
+function escapeHtml(value) {
+    return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function getQpcrExportFilename(suffix, ext) {
+    const now = new Date();
+    const stamp = [
+        now.getFullYear(),
+        String(now.getMonth() + 1).padStart(2, '0'),
+        String(now.getDate()).padStart(2, '0')
+    ].join('');
+    return `qpcr-${suffix}-${stamp}.${ext}`;
+}
+
+function downloadBlobFile(filename, content, mimeType) {
+    const blob = new Blob([content], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+}
+
+function buildQpcrPrintHtml(data) {
+    const dilutionWaterFor20ul = getDilutionWaterFor20ul(data.dilutionRatio);
+    const rtHead = data.rtPlans.map(plan => `<th>${escapeHtml(plan.group)}</th>`).join('');
+    const rtRow = (name, getter) => `
+        <tr>
+            <td>${escapeHtml(name)}</td>
+            ${data.rtPlans.map(plan => `<td>${escapeHtml(getter(plan))}</td>`).join('')}
+        </tr>
+    `;
+    const plateHead = Array.from({ length: 12 }, (_, i) => {
+        const raw = (data.design.colLabels && data.design.colLabels[i]) ? data.design.colLabels[i] : '';
+        const mapped = raw.includes(' | ') ? raw.split(' | ')[1] : '-';
+        return `<th>${i + 1} (${escapeHtml(mapped)})</th>`;
+    }).join('');
+    const plateBody = data.design.plate.map((row, rowIndex) => `
+        <tr>
+            <th>${String.fromCharCode(65 + rowIndex)} (${escapeHtml((data.design.rowLabels && data.design.rowLabels[rowIndex]) ? data.design.rowLabels[rowIndex].split(' | ')[1] : '-')})</th>
+            ${row.map(cell => `<td>${cell ? '●' : '-'}</td>`).join('')}
+        </tr>
+    `).join('');
+
+    const tube1Rows = data.tube1Plans.map(plan => `
+        <tr>
+            <td>${escapeHtml(plan.name)}</td>
+            <td>${escapeHtml(`${plan.baseWells} + ${data.extraWells}`)}</td>
+            <td>${escapeHtml(formatQpcr(plan.sybr))}</td>
+            <td>${escapeHtml(formatQpcr(plan.water))}</td>
+            <td>${escapeHtml(formatQpcr(plan.primerF))}</td>
+            <td>${escapeHtml(formatQpcr(plan.primerR))}</td>
+            <td>${escapeHtml(formatQpcr(plan.totalVol))}</td>
+        </tr>
+    `).join('');
+
+    const tube2Rows = data.tube2Plans.map(plan => `
+        <tr>
+            <td>${escapeHtml(plan.name)}</td>
+            <td>${escapeHtml(`${plan.baseWells} + ${data.extraWells}`)}</td>
+            <td>${escapeHtml(formatQpcr(plan.cdna))}</td>
+            <td>${escapeHtml(formatQpcr(plan.water))}</td>
+            <td>${escapeHtml(formatQpcr(plan.totalVol))}</td>
+        </tr>
+    `).join('');
+
+    return `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>qPCR 打印记录</title>
+<style>
+body { font-family: "PingFang SC", "Microsoft YaHei", Arial, sans-serif; color: #0f172a; margin: 20px; }
+h1, h2 { margin: 0 0 10px; }
+h1 { font-size: 20px; }
+h2 { margin-top: 18px; font-size: 16px; }
+p { margin: 4px 0; }
+table { border-collapse: collapse; width: 100%; margin-top: 8px; font-size: 12px; }
+th, td { border: 1px solid #cbd5e1; padding: 6px 8px; text-align: left; white-space: nowrap; }
+th { background: #f8fafc; }
+.rt th:first-child, .rt td:first-child { background: #f8fafc; font-weight: 600; }
+.muted { color: #475569; }
+@media print { body { margin: 10mm; } h2 { page-break-after: avoid; } }
+</style>
+</head>
+<body>
+<h1>qPCR 实验打印记录</h1>
+<p>日期：${escapeHtml(new Date().toLocaleString('zh-CN'))}</p>
+<p>分组：${escapeHtml(data.cleanGroups.map(g => g.name).join('、'))}</p>
+<p>基因：${escapeHtml(data.cleanGenes.map(g => g.name).join('、'))}</p>
+<p>总反应孔：${escapeHtml(`${data.reactionCount}`)}（每组/基因 ${escapeHtml(`${data.replicates}`)} 平行）</p>
+
+<h2>1. 逆转录体系配置（20 µL/样品）</h2>
+<table class="rt">
+<thead><tr><th>组分</th>${rtHead}</tr></thead>
+<tbody>
+${rtRow('RNA 浓度 (ng/µL)', p => formatQpcr(p.rnaConc))}
+${rtRow('目标 RNA (ng)', p => formatQpcr(p.targetRnaNg))}
+${rtRow('RNA 体积 (µL)', p => formatQpcr(p.rnaVol))}
+${rtRow('gDNA Mix (µL)', p => formatQpcr(p.gdnaMix))}
+${rtRow('5X Evo Reaction Mix (µL)', p => formatQpcr(p.evoMix))}
+${rtRow('无酶水 (µL)', p => formatQpcr(p.water))}
+${rtRow('总量 (µL)', () => '20.00')}
+${rtRow('cDNA 稀释加无酶水 (µL)', () => formatQpcr(dilutionWaterFor20ul))}
+</tbody>
+</table>
+<p class="muted">建议稀释比例：${data.dilutionRatio >= 1 ? `1:${escapeHtml(formatQpcr(data.dilutionRatio))}` : `浓度不足（比值 ${escapeHtml(formatQpcr(data.dilutionRatio))}）`}</p>
+
+<h2>2. qPCR 上板体系 A（引物预混管）</h2>
+<table>
+<thead><tr><th>名称</th><th>孔数(基础+富余)</th><th>SYBR</th><th>无酶水</th><th>Primer F</th><th>Primer R</th><th>总量</th></tr></thead>
+<tbody>${tube1Rows}</tbody>
+</table>
+
+<h2>3. qPCR 上板体系 B（cDNA 样品管）</h2>
+<table>
+<thead><tr><th>名称</th><th>孔数(基础+富余)</th><th>cDNA</th><th>无酶水</th><th>总量</th></tr></thead>
+<tbody>${tube2Rows}</tbody>
+</table>
+
+<h2>4. 96 孔板排布示意</h2>
+<table>
+<thead><tr><th></th>${plateHead}</tr></thead>
+<tbody>${plateBody}</tbody>
+</table>
+</body>
+</html>`;
 }
