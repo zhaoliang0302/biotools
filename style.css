@@ -101,9 +101,13 @@ header p {
 /* Main Layout */
 .app-grid {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     gap: 30px;
     align-items: start;
+}
+
+.app-grid > .card {
+    min-width: 0;
 }
 
 @media (max-width: 900px) {
@@ -502,4 +506,156 @@ select:focus, input:focus {
 .tooltip-container:hover .tooltip-text {
     visibility: visible;
     opacity: 1;
+}
+
+.label-with-tip {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.inline-tip {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #0369a1;
+    background: #e0f2fe;
+    border: 1px solid #bae6fd;
+    border-radius: 999px;
+    padding: 2px 8px;
+}
+
+.qpcr-warn {
+    background: #fff7ed;
+    border-color: #fed7aa;
+    color: #c2410c;
+}
+
+.rt-table-wrap {
+    width: 100%;
+    overflow-x: auto;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+
+.rt-table {
+    min-width: 680px;
+}
+
+.rt-table th:first-child,
+.rt-table td:first-child {
+    position: sticky;
+    left: 0;
+    background: #f8fafc;
+    z-index: 1;
+    min-width: 160px;
+}
+
+.plate-wrap {
+    width: 100%;
+    overflow-x: auto;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+
+.plate-table {
+    width: 100%;
+    min-width: 880px;
+    border-collapse: collapse;
+    font-size: 0.75rem;
+}
+
+.plate-table th,
+.plate-table td {
+    border: 1px solid var(--border);
+    text-align: center;
+    padding: 6px 4px;
+    vertical-align: middle;
+}
+
+.plate-table th {
+    background: #f8fafc;
+    color: var(--text-muted);
+    font-weight: 600;
+}
+
+.plate-cell {
+    background: #fefefe;
+    width: 72px;
+    height: 32px;
+}
+
+.plate-cell.empty {
+    color: #cbd5e1;
+    background: #f8fafc;
+}
+
+.plate-cell.filled {
+    background: #eff6ff;
+}
+
+.well-dot {
+    color: #2563eb;
+    font-size: 0.8rem;
+    font-weight: 700;
+}
+
+.axis-main {
+    font-weight: 700;
+    color: var(--text-main);
+    line-height: 1.1;
+}
+
+.axis-note {
+    color: var(--text-muted);
+    font-size: 0.65rem;
+    line-height: 1.1;
+    margin-top: 2px;
+    white-space: nowrap;
+    max-width: 92px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+#module-qpcr .app-grid {
+    grid-template-columns: minmax(340px, 0.9fr) minmax(0, 1.35fr);
+}
+
+#module-qpcr .qpcr-group-item {
+    display: grid;
+    grid-template-columns: minmax(140px, 1fr) minmax(140px, 1fr) auto;
+    gap: 10px;
+    align-items: center;
+}
+
+#module-qpcr .qpcr-gene-item {
+    display: grid;
+    grid-template-columns: minmax(220px, 1fr) auto;
+    gap: 10px;
+    align-items: center;
+}
+
+#module-qpcr .qpcr-group-item .input-with-unit {
+    margin-bottom: 0;
+}
+
+#module-qpcr .qpcr-group-item input,
+#module-qpcr .qpcr-gene-item input {
+    min-width: 0;
+}
+
+.plate-hint {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+}
+
+.plate-hint-warn {
+    color: #b45309;
+}
+
+@media (max-width: 1100px) {
+    #module-qpcr .app-grid {
+        grid-template-columns: 1fr;
+    }
 }
