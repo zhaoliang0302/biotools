@@ -753,7 +753,8 @@ function renderQpcrCalcTable(data) {
 
 function renderQpcrRtTable(rtPlans, dilutionRatio) {
     const head = rtPlans.map(plan => `<th>${plan.group}</th>`).join('');
-    const dilutionWaterPerOneCdna = dilutionRatio > 1 ? dilutionRatio - 1 : 0;
+    const dilutionTotalVol = 20;
+    const dilutionWaterFor20ul = dilutionRatio > 1 ? dilutionTotalVol * (dilutionRatio - 1) : 0;
     const buildRow = (label, getter, highlight = false) => {
         const cells = rtPlans.map(plan => {
             const val = getter(plan);
@@ -780,7 +781,7 @@ function renderQpcrRtTable(rtPlans, dilutionRatio) {
                     ${buildRow('5X Evo Reaction Mix (µL)', p => formatQpcr(p.evoMix))}
                     ${buildRow('无酶水 (µL)', p => formatQpcr(p.water), true)}
                     ${buildRow('总量 (µL)', () => '20.00')}
-                    ${buildRow('cDNA 稀释加无酶水 (µL)', () => formatQpcr(dilutionWaterPerOneCdna), true)}
+                    ${buildRow('cDNA 稀释加无酶水 (µL)', () => formatQpcr(dilutionWaterFor20ul), true)}
                 </tbody>
             </table>
         </div>
