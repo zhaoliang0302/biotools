@@ -532,14 +532,26 @@ select:focus, input:focus {
 }
 
 .rt-table-wrap {
+    display: block;
     width: 100%;
+    max-width: 100%;
     overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+    touch-action: pan-x;
     border: 1px solid var(--border);
     border-radius: 8px;
 }
 
 .rt-table {
+    width: max-content;
     min-width: 680px;
+}
+
+.rt-table th,
+.rt-table td {
+    white-space: nowrap;
 }
 
 .rt-table th:first-child,
@@ -657,5 +669,21 @@ select:focus, input:focus {
 @media (max-width: 1100px) {
     #module-qpcr .app-grid {
         grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 768px) {
+    .rt-table-wrap {
+        border-radius: 6px;
+    }
+
+    .rt-table {
+        min-width: 620px;
+        font-size: 0.85rem;
+    }
+
+    .rt-table th:first-child,
+    .rt-table td:first-child {
+        min-width: 130px;
     }
 }
