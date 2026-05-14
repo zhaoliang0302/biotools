@@ -245,8 +245,9 @@ select:focus, input:focus {
 
 .group-item {
     display: flex;
+    flex-direction: column;
     gap: 10px;
-    align-items: center;
+    align-items: stretch;
     background: #fff;
     border: 1px solid var(--border);
     padding: 10px;
@@ -264,6 +265,64 @@ select:focus, input:focus {
 
 .group-item input[type="number"] {
     flex: 1;
+}
+
+.group-main-row {
+    display: grid;
+    grid-template-columns: minmax(140px, 1fr) minmax(90px, 0.45fr) auto;
+    gap: 10px;
+    align-items: center;
+}
+
+.group-b-config {
+    background: #f8fafc;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px;
+}
+
+.group-b-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: var(--secondary);
+    margin-bottom: 8px;
+}
+
+.sirna-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.sirna-row {
+    display: grid;
+    grid-template-columns: minmax(120px, 1fr) minmax(110px, 0.7fr) auto;
+    gap: 8px;
+    align-items: center;
+}
+
+.btn-inline {
+    border: 1px solid var(--border);
+    background: #fff;
+    color: var(--primary);
+    border-radius: 6px;
+    padding: 5px 8px;
+    cursor: pointer;
+    font-size: 0.78rem;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    white-space: nowrap;
+}
+
+.btn-inline:hover {
+    background: #eff6ff;
+    border-color: var(--primary);
 }
 
 .btn-icon {
@@ -308,6 +367,35 @@ select:focus, input:focus {
 .btn-add:hover {
     background: #eff6ff;
     border-color: var(--primary);
+}
+
+.action-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.btn-secondary {
+    border: 1px solid var(--border);
+    background: #fff;
+    color: var(--text-main);
+    padding: 10px 8px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    transition: all 0.2s;
+    min-width: 0;
+}
+
+.btn-secondary:hover {
+    border-color: var(--primary);
+    color: var(--primary);
+    background: #eff6ff;
 }
 
 /* Primary Action */
@@ -465,6 +553,102 @@ select:focus, input:focus {
     max-height: 300px;
     overflow-y: auto;
     margin-top: 10px;
+}
+
+.print-area {
+    display: none;
+}
+
+.print-sheet {
+    color: #111827;
+    background: white;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+}
+
+.print-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 16px;
+    border-bottom: 2px solid #111827;
+    padding-bottom: 8px;
+    margin-bottom: 12px;
+}
+
+.print-header h1 {
+    font-size: 18pt;
+    line-height: 1.2;
+    margin: 0 0 4px;
+}
+
+.print-header p,
+.print-meta {
+    font-size: 9pt;
+    color: #374151;
+}
+
+.print-meta {
+    text-align: right;
+    line-height: 1.45;
+    white-space: nowrap;
+}
+
+.print-block {
+    margin-bottom: 12px;
+}
+
+.print-block h2 {
+    font-size: 12pt;
+    margin: 0 0 6px;
+}
+
+.print-sheet table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 9.5pt;
+    page-break-inside: avoid;
+}
+
+.print-sheet th,
+.print-sheet td {
+    border: 1px solid #d1d5db;
+    padding: 4px 6px;
+    text-align: left;
+    vertical-align: top;
+}
+
+.print-sheet th {
+    background: #f3f4f6;
+    font-weight: 700;
+}
+
+.print-group-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.print-group {
+    page-break-inside: avoid;
+}
+
+.print-group h3 {
+    font-size: 10.5pt;
+    margin: 0 0 4px;
+}
+
+.print-group h3 span {
+    font-size: 8.5pt;
+    font-weight: 500;
+    color: #4b5563;
+}
+
+.print-note {
+    border: 1px solid #9ca3af;
+    background: #f9fafb;
+    padding: 7px 8px;
+    font-size: 9.5pt;
+    page-break-inside: avoid;
 }
 
 .btn-copy {
@@ -684,6 +868,20 @@ select:focus, input:focus {
 }
 
 @media (max-width: 768px) {
+    .action-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .group-main-row,
+    .sirna-row {
+        grid-template-columns: 1fr;
+    }
+
+    .group-main-row .btn-icon,
+    .sirna-row .btn-icon {
+        justify-self: end;
+    }
+
     #module-qpcr .card-header {
         align-items: flex-start;
         gap: 8px;
@@ -706,5 +904,41 @@ select:focus, input:focus {
     .header-actions {
         flex-wrap: wrap;
         justify-content: flex-end;
+    }
+}
+
+@media print {
+    @page {
+        size: A4;
+        margin: 12mm;
+    }
+
+    html,
+    body {
+        background: white;
+        padding: 0;
+    }
+
+    body > *:not(.container),
+    .container > *:not(.print-area) {
+        display: none !important;
+    }
+
+    .container {
+        max-width: none;
+        padding: 0;
+        margin: 0;
+    }
+
+    .print-area {
+        display: block !important;
+    }
+
+    .print-sheet {
+        display: block;
+    }
+
+    .print-group-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 }

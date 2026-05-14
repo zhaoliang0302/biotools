@@ -33,11 +33,12 @@
                     <label>实验规格（加载预设）</label>
                     <select id="plateType" onchange="loadPreset()">
                         <option value="6well">六孔板</option>
+                        <option value="12well">12孔板</option>
                         <option value="60mm">60mm 培养皿</option>
                     </select>
                 </div>
 
-                <div class="section-title">单孔体系定义</div>
+                <div class="section-title">单孔体系定义（默认）</div>
                 
                 <div class="volume-grid">
                     <div class="vol-box">
@@ -95,6 +96,12 @@
                 <button class="btn-primary" onclick="calculate()">
                         <i class="fas fa-calculator"></i> 生成方案
                     </button>
+                <div class="action-grid">
+                    <button class="btn-secondary" onclick="exportLipoConfig()"><i class="fas fa-file-export"></i> 导出配置</button>
+                    <button class="btn-secondary" onclick="triggerImportLipoConfig()"><i class="fas fa-file-import"></i> 导入配置</button>
+                    <button class="btn-secondary" onclick="exportLipoPrintPdf()"><i class="fas fa-print"></i> 打印/PDF</button>
+                </div>
+                <input type="file" id="lipoConfigFile" accept="application/json,.json" style="display:none;" onchange="importLipoConfig(event)">
             </section>
 
             <!-- Right Column: Results -->
@@ -160,6 +167,8 @@
             </section>
             </div>
         </div>
+
+        <div id="printArea" class="print-area" aria-hidden="true"></div>
 
         <div id="module-tic" class="module">
             <div class="app-grid">

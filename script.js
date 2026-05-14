@@ -2,17 +2,21 @@
 const PRESETS = {
     '6well': {
         name: '六孔板 (6-well)',
-        optiA: 125, lipo: 5, optiB: 125, sirna: 5
+        optiA: 125, lipo: 7.5, optiB: 125, sirna: 5
+    },
+    '12well': {
+        name: '12孔板 (12-well)',
+        optiA: 50, lipo: 3, optiB: 50, sirna: 2.5
     },
     '60mm': {
         name: '60mm 培养皿',
-        optiA: 250, lipo: 10, optiB: 250, sirna: 10
+        optiA: 250, lipo: 17, optiB: 250, sirna: 10
     }
 };
 
 let groups = [
-    { id: 1, name: 'siNC', wells: 1 },
-    { id: 1002, name: 'siRNA-1', wells: 3 }
+    { id: 1, name: 'siNC', wells: 1, optiB: 125, sirnas: [{ id: 11, name: 'siNC', volume: 5 }] },
+    { id: 1002, name: 'siRNA-1', wells: 3, optiB: 125, sirnas: [{ id: 10021, name: 'siRNA-1', volume: 5 }] }
 ];
 
 let qpcrGroups = [
@@ -26,6 +30,7 @@ let qpcrGenes = [
 ];
 
 let lastQpcrData = null;
+let lastLipoPlan = null;
 
 document.addEventListener('DOMContentLoaded', () => {
     loadPreset();
@@ -51,11 +56,25 @@ function bindTabs() {
 
 function loadPreset() {
     const type = document.getElementById('plateType').value;
+    const previousOptiB = parseFloat(document.getElementById('volOptiB').value);
+    const previousSirna = parseFloat(document.getElementById('volSiRNA').value);
     const p = PRESETS[type];
     document.getElementById('volOptiA').value = p.optiA;
     document.getElementById('volLipo').value = p.lipo;
     document.getElementById('volOptiB').value = p.optiB;
     document.getElementById('volSiRNA').value = p.sirna;
+    groups.forEach(group => {
+        ensureGroupBConfig(group);
+        if (!Number.isFinite(previousOptiB) || group.optiB === previousOptiB) {
+            group.optiB = p.optiB;
+        }
+        group.sirnas.forEach(sirna => {
+            if (!Number.isFinite(previousSirna) || sirna.volume === previousSirna) {
+                sirna.volume = p.sirna;
+            }
+        });
+    });
+    renderGroups();
 }
 
 function renderGroups() {
@@ -63,15 +82,41 @@ function renderGroups() {
     list.innerHTML = '';
     
     groups.forEach((group, index) => {
+        ensureGroupBConfig(group);
         const div = document.createElement('div');
         div.className = 'group-item';
-        div.innerHTML = `
-            <input type="text" placeholder="分组名称" value="${group.name}" onchange="updateGroup(${index}, 'name', this.value)">
-            <div class="input-with-unit" style="margin-bottom:0; flex:1;">
-                <input type="number" placeholder="孔数" value="${group.wells}" min="0" step="1" onchange="updateGroup(${index}, 'wells', this.value)">
-                <span style="font-size:0.75rem;">孔</span>
+        const sirnaRows = group.sirnas.map((sirna, sirnaIndex) => `
+            <div class="sirna-row">
+                <input type="text" placeholder="siRNA名称" value="${escapeHtml(sirna.name)}" onchange="updateGroupSirna(${index}, ${sirnaIndex}, 'name', this.value)">
+                <div class="input-with-unit" style="margin-bottom:0;">
+                    <input type="number" placeholder="单孔量" value="${sirna.volume}" min="0" step="0.1" onchange="updateGroupSirna(${index}, ${sirnaIndex}, 'volume', this.value)">
+                    <span style="font-size:0.75rem;">µL/孔</span>
+                </div>
+                <button class="btn-icon" onclick="removeGroupSirna(${index}, ${sirnaIndex})" title="删除siRNA"><i class="fas fa-minus"></i></button>
             </div>
-            <button class="btn-icon" onclick="removeGroup(${index})" title="删除"><i class="fas fa-trash-alt"></i></button>
+        `).join('');
+        div.innerHTML = `
+            <div class="group-main-row">
+                <input type="text" placeholder="分组名称" value="${escapeHtml(group.name)}" onchange="updateGroup(${index}, 'name', this.value)">
+                <div class="input-with-unit" style="margin-bottom:0;">
+                    <input type="number" placeholder="孔数" value="${group.wells}" min="0" step="1" onchange="updateGroup(${index}, 'wells', this.value)">
+                    <span style="font-size:0.75rem;">孔</span>
+                </div>
+                <button class="btn-icon" onclick="removeGroup(${index})" title="删除分组"><i class="fas fa-trash-alt"></i></button>
+            </div>
+            <div class="group-b-config">
+                <div class="group-b-title">
+                    <span><span class="tag tag-b">B 管</span> ${escapeHtml(group.name || `分组${index + 1}`)}</span>
+                    <button class="btn-inline" onclick="addGroupSirna(${index})"><i class="fas fa-plus"></i> siRNA</button>
+                </div>
+                <label class="input-label-small">B 管 Opti-MEM 单孔量</label>
+                <div class="input-with-unit">
+                    <input type="number" value="${group.optiB}" min="0" step="1" onchange="updateGroup(${index}, 'optiB', this.value)">
+                    <span>µL/孔</span>
+                </div>
+                <label class="input-label-small">siRNA 组分</label>
+                <div class="sirna-list">${sirnaRows}</div>
+            </div>
         `;
         list.appendChild(div);
     });
@@ -79,8 +124,31 @@ function renderGroups() {
 
 function addGroup() {
     const nextIndex = getNextSiRnaIndex();
-    groups.push({ id: Date.now(), name: `siRNA-${nextIndex}`, wells: 1 });
+    groups.push(createGroup(`siRNA-${nextIndex}`, 1));
     renderGroups();
+}
+
+function createGroup(name, wells) {
+    const defaultOptiB = parseFloat(document.getElementById('volOptiB').value) || PRESETS['6well'].optiB;
+    const defaultSirna = parseFloat(document.getElementById('volSiRNA').value) || PRESETS['6well'].sirna;
+    const id = Date.now();
+    return {
+        id,
+        name,
+        wells,
+        optiB: defaultOptiB,
+        sirnas: [{ id: id + 1, name, volume: defaultSirna }]
+    };
+}
+
+function ensureGroupBConfig(group) {
+    if (typeof group.optiB !== 'number') {
+        group.optiB = parseFloat(document.getElementById('volOptiB').value) || PRESETS['6well'].optiB;
+    }
+    if (!Array.isArray(group.sirnas) || group.sirnas.length === 0) {
+        const defaultSirna = parseFloat(document.getElementById('volSiRNA').value) || PRESETS['6well'].sirna;
+        group.sirnas = [{ id: Date.now(), name: group.name || 'siRNA', volume: defaultSirna }];
+    }
 }
 
 function getNextSiRnaIndex() {
@@ -105,11 +173,45 @@ function removeGroup(index) {
 }
 
 function updateGroup(index, field, value) {
-    if (field === 'wells') {
+    if (field === 'wells' || field === 'optiB') {
         value = parseFloat(value);
         if (value < 0) value = 0;
     }
     groups[index][field] = value;
+}
+
+function addGroupSirna(groupIndex) {
+    const group = groups[groupIndex];
+    ensureGroupBConfig(group);
+    const nextNumber = group.sirnas.length + 1;
+    const defaultSirna = parseFloat(document.getElementById('volSiRNA').value) || PRESETS['6well'].sirna;
+    group.sirnas.push({
+        id: Date.now(),
+        name: `siRNA-${nextNumber}`,
+        volume: defaultSirna
+    });
+    renderGroups();
+}
+
+function updateGroupSirna(groupIndex, sirnaIndex, field, value) {
+    const group = groups[groupIndex];
+    ensureGroupBConfig(group);
+    if (field === 'volume') {
+        value = parseFloat(value);
+        if (!Number.isFinite(value) || value < 0) value = 0;
+    }
+    group.sirnas[sirnaIndex][field] = value;
+}
+
+function removeGroupSirna(groupIndex, sirnaIndex) {
+    const group = groups[groupIndex];
+    ensureGroupBConfig(group);
+    if (group.sirnas.length <= 1) {
+        alert('每个 B 管至少保留一个 siRNA 组分。');
+        return;
+    }
+    group.sirnas.splice(sirnaIndex, 1);
+    renderGroups();
 }
 
 function calculate() {
@@ -128,14 +230,24 @@ function calculate() {
     // 2. Logic
     let totalWellsForTubeA = 0;
     const groupResults = groups.map(group => {
+        ensureGroupBConfig(group);
         const calcWells = group.wells + groupExtra; 
         totalWellsForTubeA += calcWells;
+        const sirnas = group.sirnas.map(sirna => ({
+            ...sirna,
+            volume: parseFloat(sirna.volume) || 0,
+            total: calcWells * (parseFloat(sirna.volume) || 0)
+        }));
+        const totalSirnaPerWell = sirnas.reduce((sum, sirna) => sum + sirna.volume, 0);
         
         return {
             ...group,
             calcWells: calcWells,
-            optiB: calcWells * settings.optiB,
-            sirna: calcWells * settings.sirna
+            optiBPerWell: parseFloat(group.optiB) || 0,
+            optiB: calcWells * (parseFloat(group.optiB) || 0),
+            sirnas,
+            totalSirnaPerWell,
+            totalSirna: calcWells * totalSirnaPerWell
         };
     });
 
@@ -148,6 +260,7 @@ function calculate() {
     };
 
     // 3. Render
+    lastLipoPlan = { settings, tubeA, groupResults, groupExtra, tubeAExtra };
     renderResults(settings, tubeA, groupResults, groupExtra, tubeAExtra);
 }
 
@@ -188,7 +301,7 @@ function renderResults(settings, tubeA, groupResults, groupExtra, tubeAExtra) {
         tubeBHtml += `
             <div class="group-card">
                 <div class="group-card-header">
-                    <span>${group.name}</span>
+                    <span>${escapeHtml(group.name)}</span>
                     <span style="font-weight:400; font-size:0.9em; color:var(--text-muted);">${group.wells}孔 (配${formatNum(group.calcWells)})</span>
                 </div>
                 <table class="data-table" style="font-size:0.85rem;">
@@ -196,13 +309,19 @@ function renderResults(settings, tubeA, groupResults, groupExtra, tubeAExtra) {
                         <td width="50%">Opti-MEM</td>
                         <td class="val-highlight">${formatNum(group.optiB)} µL</td>
                     </tr>
-                    <tr>
-                        <td>siRNA</td>
-                        <td class="val-highlight">${formatNum(group.sirna)} µL</td>
-                    </tr>
+                    ${group.sirnas.map(sirna => `
+                        <tr>
+                            <td>${escapeHtml(sirna.name || 'siRNA')} <span style="color:var(--text-muted);">(${formatNum(sirna.volume)} µL/孔)</span></td>
+                            <td class="val-highlight">${formatNum(sirna.total)} µL</td>
+                        </tr>
+                    `).join('')}
                     <tr style="color:var(--primary);">
                         <td>加入 A 管混合液</td>
                         <td class="val-highlight">${formatNum(volFromA)} µL</td>
+                    </tr>
+                    <tr style="background-color: #f8fafc; font-weight:600;">
+                        <td>每孔转染复合物</td>
+                        <td>${formatNum((settings.optiA + settings.lipo) + group.optiBPerWell + group.totalSirnaPerWell)} µL</td>
                     </tr>
                 </table>
             </div>
@@ -227,21 +346,32 @@ function generateProtocolText(settings, tubeA, groupResults) {
     groupResults.forEach(g => {
         text += `  > 分组：${g.name}\n`;
         text += `    - Opti-MEM：  ${formatNum(g.optiB)} µL\n`;
-        text += `    - siRNA：     ${formatNum(g.sirna)} µL\n`;
+        g.sirnas.forEach(sirna => {
+            text += `    - ${sirna.name || 'siRNA'}： ${formatNum(sirna.total)} µL（${formatNum(sirna.volume)} µL/孔）\n`;
+        });
         const volFromA = g.calcWells * (settings.optiA + settings.lipo);
         text += `    - 加入 A 管： ${formatNum(volFromA)} µL\n`;
+        text += `    - 每孔转染复合物：${formatNum((settings.optiA + settings.lipo) + g.optiBPerWell + g.totalSirnaPerWell)} µL\n`;
         text += `    - 轻轻混匀，室温静置 10-15 分钟\n\n`;
     });
     
-    const finalVol = (settings.optiA + settings.lipo) + (settings.optiB + settings.sirna);
     text += `[3. 加入细胞]\n`;
-    text += `  - 每孔加入转染复合物 ${formatNum(finalVol)} µL\n`;
+    text += `  - 按各组 B 管设置加入对应转染复合物，体积见上方各组记录。\n`;
 
     document.getElementById('protocolText').innerText = text;
 }
 
 function formatNum(num) {
     return parseFloat(num.toFixed(1));
+}
+
+function escapeHtml(value) {
+    return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
 }
 
 function formatQpcr(num) {
@@ -255,6 +385,185 @@ function copyProtocol() {
         // Could show a toast here
         alert("已复制到剪贴板");
     });
+}
+
+function collectLipoConfig() {
+    if (document.activeElement && typeof document.activeElement.blur === 'function') {
+        document.activeElement.blur();
+    }
+    groups.forEach(ensureGroupBConfig);
+    return {
+        app: 'biotools-lipo3000',
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        module: 'lipo3000',
+        plateType: document.getElementById('plateType').value,
+        defaults: {
+            optiA: parseFloat(document.getElementById('volOptiA').value) || 0,
+            lipo: parseFloat(document.getElementById('volLipo').value) || 0,
+            optiB: parseFloat(document.getElementById('volOptiB').value) || 0,
+            sirna: parseFloat(document.getElementById('volSiRNA').value) || 0
+        },
+        extra: {
+            groupExtraWells: parseFloat(document.getElementById('groupExtraWells').value) || 0,
+            tubeAExtraWells: parseFloat(document.getElementById('extraWells').value) || 0
+        },
+        groups: groups.map(group => ({
+            id: group.id,
+            name: group.name,
+            wells: parseFloat(group.wells) || 0,
+            optiB: parseFloat(group.optiB) || 0,
+            sirnas: group.sirnas.map(sirna => ({
+                id: sirna.id,
+                name: sirna.name,
+                volume: parseFloat(sirna.volume) || 0
+            }))
+        }))
+    };
+}
+
+function exportLipoConfig() {
+    const config = collectLipoConfig();
+    const blob = new Blob([JSON.stringify(config, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const date = new Date().toISOString().slice(0, 10);
+    a.href = url;
+    a.download = `lipo3000-config-${date}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+}
+
+function triggerImportLipoConfig() {
+    document.getElementById('lipoConfigFile').click();
+}
+
+function importLipoConfig(event) {
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+        try {
+            const config = JSON.parse(reader.result);
+            applyLipoConfig(config);
+            calculate();
+        } catch (error) {
+            alert('配置文件无法读取，请确认导入的是本工具导出的 JSON 文件。');
+        } finally {
+            event.target.value = '';
+        }
+    };
+    reader.readAsText(file);
+}
+
+function applyLipoConfig(config) {
+    if (!config || config.module !== 'lipo3000' || !config.defaults || !Array.isArray(config.groups)) {
+        throw new Error('Invalid lipo config');
+    }
+    const plateType = PRESETS[config.plateType] ? config.plateType : '6well';
+    document.getElementById('plateType').value = plateType;
+    document.getElementById('volOptiA').value = parseNumber(config.defaults.optiA, PRESETS[plateType].optiA);
+    document.getElementById('volLipo').value = parseNumber(config.defaults.lipo, PRESETS[plateType].lipo);
+    document.getElementById('volOptiB').value = parseNumber(config.defaults.optiB, PRESETS[plateType].optiB);
+    document.getElementById('volSiRNA').value = parseNumber(config.defaults.sirna, PRESETS[plateType].sirna);
+    document.getElementById('groupExtraWells').value = parseNumber(config.extra && config.extra.groupExtraWells, 0.4);
+    document.getElementById('extraWells').value = parseNumber(config.extra && config.extra.tubeAExtraWells, 0.8);
+
+    groups = config.groups.map((group, index) => {
+        const name = String(group.name || `Group-${index + 1}`);
+        const id = Number.isFinite(parseFloat(group.id)) ? parseFloat(group.id) : Date.now() + index;
+        const sirnas = Array.isArray(group.sirnas) && group.sirnas.length > 0
+            ? group.sirnas.map((sirna, sirnaIndex) => ({
+                id: Number.isFinite(parseFloat(sirna.id)) ? parseFloat(sirna.id) : Date.now() + index * 100 + sirnaIndex,
+                name: String(sirna.name || `siRNA-${sirnaIndex + 1}`),
+                volume: parseNumber(sirna.volume, parseNumber(config.defaults.sirna, PRESETS[plateType].sirna))
+            }))
+            : [{ id: Date.now() + index, name, volume: parseNumber(config.defaults.sirna, PRESETS[plateType].sirna) }];
+        return {
+            id,
+            name,
+            wells: parseNumber(group.wells, 1),
+            optiB: parseNumber(group.optiB, parseNumber(config.defaults.optiB, PRESETS[plateType].optiB)),
+            sirnas
+        };
+    });
+    if (groups.length === 0) {
+        groups = [createGroup('siRNA-1', 1)];
+    }
+    renderGroups();
+}
+
+function exportLipoPrintPdf() {
+    if (!lastLipoPlan) {
+        calculate();
+    }
+    if (!lastLipoPlan) return;
+    renderLipoPrintArea(lastLipoPlan);
+    window.print();
+}
+
+function renderLipoPrintArea(plan) {
+    const date = new Date().toLocaleDateString('zh-CN');
+    const totalActual = plan.groupResults.reduce((sum, group) => sum + group.wells, 0);
+    const tubeARows = `
+        <tr><td>Opti-MEM</td><td>${formatNum(plan.tubeA.optiA)} µL</td></tr>
+        <tr><td>Lipo3000</td><td>${formatNum(plan.tubeA.lipo)} µL</td></tr>
+        <tr><td>合计</td><td>${formatNum(plan.tubeA.totalVol)} µL</td></tr>
+    `;
+    const groupCards = plan.groupResults.map(group => {
+        const volFromA = group.calcWells * (plan.settings.optiA + plan.settings.lipo);
+        const finalPerWell = (plan.settings.optiA + plan.settings.lipo) + group.optiBPerWell + group.totalSirnaPerWell;
+        const sirnaLines = group.sirnas.map(sirna => `
+            <tr><td>${escapeHtml(sirna.name || 'siRNA')}</td><td>${formatNum(sirna.total)} µL</td></tr>
+        `).join('');
+        return `
+            <section class="print-group">
+                <h3>${escapeHtml(group.name)} <span>${group.wells}孔，配 ${formatNum(group.calcWells)} 孔</span></h3>
+                <table>
+                    <tbody>
+                        <tr><td>Opti-MEM</td><td>${formatNum(group.optiB)} µL</td></tr>
+                        ${sirnaLines}
+                        <tr><td>加入 A 管混合液</td><td>${formatNum(volFromA)} µL</td></tr>
+                        <tr><td>每孔加入转染复合物</td><td>${formatNum(finalPerWell)} µL</td></tr>
+                    </tbody>
+                </table>
+            </section>
+        `;
+    }).join('');
+
+    document.getElementById('printArea').innerHTML = `
+        <div class="print-sheet">
+            <header class="print-header">
+                <div>
+                    <h1>Lipo3000 siRNA 转染配制单</h1>
+                    <p>${escapeHtml(plan.settings.name)} | ${date}</p>
+                </div>
+                <div class="print-meta">
+                    <div>分组 ${plan.groupResults.length} 个</div>
+                    <div>实际 ${formatNum(totalActual)} 孔</div>
+                    <div>A管富余 +${formatNum(plan.tubeAExtra)} | B管富余 +${formatNum(plan.groupExtra)}/组</div>
+                </div>
+            </header>
+            <section class="print-block">
+                <h2>1. A 管共用混合液</h2>
+                <table><thead><tr><th>成分</th><th>最终配制量</th></tr></thead><tbody>${tubeARows}</tbody></table>
+            </section>
+            <section class="print-block">
+                <h2>2. 各组 B 管</h2>
+                <div class="print-group-grid">${groupCards}</div>
+            </section>
+            <section class="print-note">
+                A 管与各 B 管按上表混合，轻轻混匀，室温静置 10-15 分钟后加入细胞。不同组按对应 B 管体积执行。
+            </section>
+        </div>
+    `;
+}
+
+function parseNumber(value, fallback) {
+    const num = parseFloat(value);
+    return Number.isFinite(num) ? num : fallback;
 }
 
 function calculateTic() {
