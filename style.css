@@ -651,6 +651,54 @@ select:focus, input:focus {
     page-break-inside: avoid;
 }
 
+.print-plate-table {
+    table-layout: fixed;
+    font-size: 7.5pt;
+    margin-bottom: 8px;
+}
+
+.print-plate-title {
+    font-size: 9pt;
+    margin: 6px 0 4px;
+}
+
+.print-plate-table th,
+.print-plate-table td {
+    text-align: center;
+    padding: 3px 2px;
+    white-space: normal;
+}
+
+.print-plate-table th span {
+    display: block;
+    color: #4b5563;
+    font-size: 6.5pt;
+    line-height: 1.1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.plate-cell-print {
+    color: #9ca3af;
+}
+
+.plate-cell-print.filled {
+    color: #111827;
+    font-weight: 700;
+    background: #eff6ff;
+}
+
+.plate-cell-print strong {
+    font-size: 6.5pt;
+}
+
+.plate-cell-print span,
+.plate-cell-print small {
+    color: #4b5563;
+    font-size: 5.8pt;
+    line-height: 1.1;
+}
+
 .btn-copy {
     position: absolute;
     top: 10px;
@@ -789,7 +837,7 @@ select:focus, input:focus {
 .plate-cell {
     background: #fefefe;
     width: 72px;
-    height: 32px;
+    height: 42px;
 }
 
 .plate-cell.empty {
@@ -805,6 +853,29 @@ select:focus, input:focus {
     color: #2563eb;
     font-size: 0.8rem;
     font-weight: 700;
+}
+
+.plate-gene {
+    color: #1d4ed8;
+    font-size: 0.68rem;
+    font-weight: 700;
+    line-height: 1.1;
+    max-width: 68px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    margin: 0 auto;
+}
+
+.plate-sample {
+    color: var(--text-muted);
+    font-size: 0.6rem;
+    line-height: 1.1;
+    max-width: 68px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    margin: 2px auto 0;
 }
 
 .axis-main {
@@ -837,9 +908,13 @@ select:focus, input:focus {
 
 #module-qpcr .qpcr-gene-item {
     display: grid;
-    grid-template-columns: minmax(220px, 1fr) auto;
+    grid-template-columns: minmax(180px, 1fr) auto auto;
     gap: 10px;
     align-items: center;
+}
+
+#module-qpcr .qpcr-ref-tip {
+    white-space: nowrap;
 }
 
 #module-qpcr .qpcr-group-item .input-with-unit {

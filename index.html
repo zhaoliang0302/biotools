@@ -329,7 +329,7 @@
                         <div class="card-title"><i class="fas fa-sliders-h"></i> qPCR 参数</div>
                     </div>
 
-                    <div class="section-title">逆转录输入（20µl体系）</div>
+                    <div class="section-title">逆转录因子输入（20ul体系）</div>
                     <div class="form-group">
                         <label>目标逆转录 RNA 含量 (ng)</label>
                         <div class="tooltip-container">
@@ -338,7 +338,7 @@
                         </div>
                     </div>
 
-                    <div class="section-title">qPCR cDNA 输入</div>
+                    <div class="section-title">qPCR cDNA输入</div>
                     <div class="form-group">
                         <label class="label-with-tip">每孔加入 cDNA 含量 (ng) <span class="inline-tip">建议 5-10 ng</span></label>
                         <div class="tooltip-container">
@@ -355,7 +355,7 @@
                         </div>
                         <div class="form-group">
                             <label>富余孔数</label>
-                            <input type="number" id="qpcrExtraWells" value="2" min="0" step="1">
+                            <input type="number" id="qpcrExtraWells" value="3" min="0" step="1">
                         </div>
                     </div>
 
@@ -370,6 +370,12 @@
                     <button class="btn-primary" onclick="calculateQpcr()">
                         <i class="fas fa-calculator"></i> 生成方案
                     </button>
+                    <div class="action-grid">
+                        <button class="btn-secondary" onclick="exportQpcrConfig()"><i class="fas fa-file-export"></i> 导出配置</button>
+                        <button class="btn-secondary" onclick="triggerImportQpcrConfig()"><i class="fas fa-file-import"></i> 导入配置</button>
+                        <button class="btn-secondary" onclick="exportQpcrPrintPdf()"><i class="fas fa-print"></i> 打印/PDF</button>
+                    </div>
+                    <input type="file" id="qpcrConfigFile" accept="application/json,.json" style="display:none;" onchange="importQpcrConfig(event)">
                 </section>
 
                 <section class="card" id="qpcrResultContainer">

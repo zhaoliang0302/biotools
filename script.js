@@ -783,6 +783,7 @@ function renderQpcrGenes() {
         div.className = 'group-item qpcr-gene-item';
         div.innerHTML = `
             <input type="text" placeholder="基因名称" value="${item.name}" onchange="updateQpcrGene(${index}, this.value)">
+            ${index === 0 ? '<span class="inline-tip qpcr-ref-tip">内参</span>' : '<span></span>'}
             <button class="btn-icon" onclick="removeQpcrGene(${index})" title="删除"><i class="fas fa-trash-alt"></i></button>
         `;
         list.appendChild(div);
@@ -843,12 +844,6 @@ function calculateQpcr() {
         return;
     }
 
-    const reactionCount = cleanGroups.length * cleanGenes.length * replicates;
-    if (reactionCount > 96) {
-        alert(`当前需要 ${reactionCount} 孔，超过 96 孔板容量。请减少分组/基因或平行孔数。`);
-        return;
-    }
-
     const minRnaGroup = cleanGroups.reduce((min, g) => (g.rnaConc < min.rnaConc ? g : min), cleanGroups[0]);
     const minRnaConc = minRnaGroup.rnaConc;
     const rtRnaVolUl = targetRnaNg / minRnaConc;
@@ -856,8 +851,12 @@ function calculateQpcr() {
     const rtPlans = buildRtPlans(cleanGroups, targetRnaNg);
 
     const design = buildQpcrPlateDesign(cleanGroups, cleanGenes, replicates);
-    const tube1Plans = buildTube1Plans(cleanGroups.length, cleanGenes, replicates, extraWells);
-    const tube2Plans = buildTube2Plans(cleanGenes.length, cleanGroups, replicates, extraWells);
+    if (design.error) {
+        alert(design.error);
+        return;
+    }
+    const tube1Plans = buildTube1Plans(cleanGroups.length, cleanGenes, replicates, extraWells, design);
+    const tube2Plans = buildTube2Plans(cleanGroups, extraWells, design);
 
     renderQpcrResults({
         minRnaConc,
@@ -866,7 +865,7 @@ function calculateQpcr() {
         cdnaNgPerWell,
         replicates,
         extraWells,
-        reactionCount,
+        reactionCount: design.reactionCount,
         rtRnaVolUl,
         dilutionRatio,
         minRnaGroup,
@@ -900,82 +899,254 @@ function buildRtPlans(groupsList, targetRnaNg) {
 function buildQpcrPlateDesign(groupsList, genesList, replicates) {
     const rows = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
     const cols = 12;
-    const plate = Array.from({ length: 8 }, () => Array.from({ length: cols }, () => null));
-    const assignments = [];
-    const columnPlan = [];
-    genesList.forEach(gene => {
-        for (let rep = 1; rep <= replicates; rep += 1) {
-            columnPlan.push({ gene: gene.name, rep });
+    const reactionsPerGene = groupsList.length * replicates;
+    const maxGenesPerPlateByCapacity = Math.floor((rows.length * cols) / reactionsPerGene);
+    const getLayoutModeForGeneCount = geneCount => {
+        if (groupsList.length <= rows.length && geneCount * replicates <= cols) return 'group-rows';
+        if (geneCount <= rows.length && groupsList.length * replicates <= cols) return 'gene-rows';
+        if (geneCount * replicates <= rows.length && groupsList.length <= cols) return 'gene-rep-rows';
+        if (groupsList.length * replicates <= rows.length && geneCount <= cols) return 'group-rep-rows';
+        return null;
+    };
+    let maxGenesPerPlate = 0;
+    for (let geneCount = 1; geneCount <= genesList.length; geneCount += 1) {
+        if (geneCount <= maxGenesPerPlateByCapacity && getLayoutModeForGeneCount(geneCount)) {
+            maxGenesPerPlate = geneCount;
         }
-    });
+    }
+    if (maxGenesPerPlate < 1) {
+        return {
+            error: `当前分组和平行孔设置无法形成整齐矩阵排布。请减少分组或平行孔数。`
+        };
+    }
 
-    const useReadableLayout = groupsList.length <= 8 && columnPlan.length <= 12;
-    if (useReadableLayout) {
-        groupsList.forEach((group, rowIndex) => {
-            columnPlan.forEach((colMeta, colIndex) => {
+    const referenceGene = genesList[0];
+    const targetGenes = genesList.slice(1);
+    const onePlateWells = genesList.length * reactionsPerGene;
+    let plateGeneSets = [genesList];
+    let duplicatedReference = false;
+
+    if (onePlateWells > 96 || !getLayoutModeForGeneCount(genesList.length)) {
+        const maxTargetsPerPlate = maxGenesPerPlate - 1;
+        if (maxTargetsPerPlate < 1) {
+            return {
+                error: `当前分组和平行孔设置下，两块板模式中每块板只能容纳内参，无法加入待测基因。请减少分组或平行孔数。`
+            };
+        }
+        plateGeneSets = [];
+        for (let start = 0; start < targetGenes.length; start += maxTargetsPerPlate) {
+            plateGeneSets.push([referenceGene, ...targetGenes.slice(start, start + maxTargetsPerPlate)]);
+        }
+        duplicatedReference = true;
+    }
+
+    const buildSinglePlate = (plateGenes, plateNumber) => {
+        const plate = Array.from({ length: 8 }, () => Array.from({ length: cols }, () => null));
+        const assignments = [];
+        const layoutMode = getLayoutModeForGeneCount(plateGenes.length);
+        if (!layoutMode) {
+            return {
+                error: `板 ${plateNumber} 无法形成整齐矩阵排布。请减少该板基因数、分组数或平行孔数。`
+            };
+        }
+        const columnPlan = [];
+        plateGenes.forEach(gene => {
+            for (let rep = 1; rep <= replicates; rep += 1) {
+                columnPlan.push({ gene: gene.name, rep });
+            }
+        });
+
+        if (layoutMode === 'group-rows') {
+            groupsList.forEach((group, rowIndex) => {
+                columnPlan.forEach((colMeta, colIndex) => {
+                    const well = `${rows[rowIndex]}${colIndex + 1}`;
+                    const sample = {
+                        plate: plateNumber,
+                        group: group.name,
+                        gene: colMeta.gene,
+                        rep: colMeta.rep,
+                        well
+                    };
+                    plate[rowIndex][colIndex] = sample;
+                    assignments.push(sample);
+                });
+            });
+
+            const rowLabels = rows.map((rowName, rowIndex) => (
+                rowIndex < groupsList.length ? `${rowName} | ${groupsList[rowIndex].name}` : `${rowName} | -`
+            ));
+            const colLabels = Array.from({ length: cols }, (_, colIndex) => (
+                colIndex < columnPlan.length ? `${colIndex + 1} | ${columnPlan[colIndex].gene}` : `${colIndex + 1} | -`
+            ));
+
+            return {
+                plate,
+                assignments,
+                rowLabels,
+                colLabels,
+                useReadableLayout: true,
+                layoutMode: 'group-rows',
+                plateNumber,
+                genes: plateGenes.map(g => g.name)
+            };
+        }
+
+        const sampleColumns = [];
+        groupsList.forEach(group => {
+            for (let rep = 1; rep <= replicates; rep += 1) {
+                sampleColumns.push({ group: group.name, rep });
+            }
+        });
+        if (layoutMode === 'gene-rows') {
+            plateGenes.forEach((gene, rowIndex) => {
+                sampleColumns.forEach((sampleCol, colIndex) => {
+                    const well = `${rows[rowIndex]}${colIndex + 1}`;
+                    const sample = {
+                        plate: plateNumber,
+                        group: sampleCol.group,
+                        gene: gene.name,
+                        rep: sampleCol.rep,
+                        well
+                    };
+                    plate[rowIndex][colIndex] = sample;
+                    assignments.push(sample);
+                });
+            });
+
+            const rowLabels = rows.map((rowName, rowIndex) => (
+                rowIndex < plateGenes.length ? `${rowName} | ${plateGenes[rowIndex].name}` : `${rowName} | -`
+            ));
+            const colLabels = Array.from({ length: cols }, (_, colIndex) => (
+                colIndex < sampleColumns.length ? `${colIndex + 1} | ${sampleColumns[colIndex].group} R${sampleColumns[colIndex].rep}` : `${colIndex + 1} | -`
+            ));
+
+            return {
+                plate,
+                assignments,
+                rowLabels,
+                colLabels,
+                useReadableLayout: true,
+                layoutMode: 'gene-rows',
+                plateNumber,
+                genes: plateGenes.map(g => g.name)
+            };
+        }
+
+        if (layoutMode === 'gene-rep-rows') {
+            const geneRepRows = [];
+            plateGenes.forEach(gene => {
+                for (let rep = 1; rep <= replicates; rep += 1) {
+                    geneRepRows.push({ gene: gene.name, rep });
+                }
+            });
+            geneRepRows.forEach((rowMeta, rowIndex) => {
+                groupsList.forEach((group, colIndex) => {
+                    const well = `${rows[rowIndex]}${colIndex + 1}`;
+                    const sample = {
+                        plate: plateNumber,
+                        group: group.name,
+                        gene: rowMeta.gene,
+                        rep: rowMeta.rep,
+                        well
+                    };
+                    plate[rowIndex][colIndex] = sample;
+                    assignments.push(sample);
+                });
+            });
+            const rowLabels = rows.map((rowName, rowIndex) => (
+                rowIndex < geneRepRows.length ? `${rowName} | ${geneRepRows[rowIndex].gene} R${geneRepRows[rowIndex].rep}` : `${rowName} | -`
+            ));
+            const colLabels = Array.from({ length: cols }, (_, colIndex) => (
+                colIndex < groupsList.length ? `${colIndex + 1} | ${groupsList[colIndex].name}` : `${colIndex + 1} | -`
+            ));
+            return {
+                plate,
+                assignments,
+                rowLabels,
+                colLabels,
+                useReadableLayout: true,
+                layoutMode: 'gene-rep-rows',
+                plateNumber,
+                genes: plateGenes.map(g => g.name)
+            };
+        }
+
+        const groupRepRows = [];
+        groupsList.forEach(group => {
+            for (let rep = 1; rep <= replicates; rep += 1) {
+                groupRepRows.push({ group: group.name, rep });
+            }
+        });
+        groupRepRows.forEach((rowMeta, rowIndex) => {
+            plateGenes.forEach((gene, colIndex) => {
                 const well = `${rows[rowIndex]}${colIndex + 1}`;
                 const sample = {
-                    group: group.name,
-                    gene: colMeta.gene,
-                    rep: colMeta.rep,
+                    plate: plateNumber,
+                    group: rowMeta.group,
+                    gene: gene.name,
+                    rep: rowMeta.rep,
                     well
                 };
                 plate[rowIndex][colIndex] = sample;
                 assignments.push(sample);
             });
         });
-
         const rowLabels = rows.map((rowName, rowIndex) => (
-            rowIndex < groupsList.length ? `${rowName} | ${groupsList[rowIndex].name}` : `${rowName} | -`
+            rowIndex < groupRepRows.length ? `${rowName} | ${groupRepRows[rowIndex].group} R${groupRepRows[rowIndex].rep}` : `${rowName} | -`
         ));
         const colLabels = Array.from({ length: cols }, (_, colIndex) => (
-            colIndex < columnPlan.length ? `${colIndex + 1} | ${columnPlan[colIndex].gene}` : `${colIndex + 1} | -`
+            colIndex < plateGenes.length ? `${colIndex + 1} | ${plateGenes[colIndex].name}` : `${colIndex + 1} | -`
         ));
+        return {
+            plate,
+            assignments,
+            rowLabels,
+            colLabels,
+            useReadableLayout: true,
+            layoutMode: 'group-rep-rows',
+            plateNumber,
+            genes: plateGenes.map(g => g.name)
+        };
+    };
 
-        return { plate, assignments, rowLabels, colLabels, useReadableLayout };
+    const plates = [];
+    for (let index = 0; index < plateGeneSets.length; index += 1) {
+        const plateDesign = buildSinglePlate(plateGeneSets[index], index + 1);
+        if (plateDesign.error) return plateDesign;
+        plates.push(plateDesign);
     }
-
-    // Fallback: keep full 96 孔兼容，但标签只展示首个命中，避免出现混合字符串。
-    let idx = 0;
-    genesList.forEach(gene => {
-        groupsList.forEach(group => {
-            for (let rep = 1; rep <= replicates; rep += 1) {
-                const rowIndex = Math.floor(idx / cols);
-                const colIndex = idx % cols;
-                const well = `${rows[rowIndex]}${colIndex + 1}`;
-                const sample = { group: group.name, gene: gene.name, rep, well };
-                plate[rowIndex][colIndex] = sample;
-                assignments.push(sample);
-                idx += 1;
-            }
+    const assignments = plates.flatMap(plate => plate.assignments);
+    const genePlateCounts = {};
+    plateGeneSets.forEach(plateGenes => {
+        plateGenes.forEach(gene => {
+            genePlateCounts[gene.name] = (genePlateCounts[gene.name] || 0) + 1;
         });
     });
-
-    const rowLabels = rows.map((rowName, rowIndex) => {
-        const first = plate[rowIndex].find(Boolean);
-        return `${rowName} | ${first ? first.group : '-'}`;
-    });
-    const colLabels = Array.from({ length: cols }, (_, colIndex) => {
-        let first = null;
-        for (let rowIndex = 0; rowIndex < 8; rowIndex += 1) {
-            if (plate[rowIndex][colIndex]) {
-                first = plate[rowIndex][colIndex];
-                break;
-            }
-        }
-        return `${colIndex + 1} | ${first ? first.gene : '-'}`;
-    });
-
-    return { plate, assignments, rowLabels, colLabels, useReadableLayout };
+    const firstPlate = plates[0];
+    return {
+        ...firstPlate,
+        plates,
+        assignments,
+        plateCount: plates.length,
+        duplicatedReference,
+        referenceGene: referenceGene.name,
+        genePlateCounts,
+        reactionCount: assignments.length
+    };
 }
 
-function buildTube1Plans(groupCount, genesList, replicates, extraWells) {
-    return genesList.map(gene => {
-        const baseWells = groupCount * replicates;
+function buildTube1Plans(groupCount, genesList, replicates, extraWells, design) {
+    return genesList.map((gene, index) => {
+        const plateCount = design.genePlateCounts[gene.name] || 1;
+        const baseWells = groupCount * replicates * plateCount;
         const totalWells = baseWells + extraWells;
+        const refLabel = index === 0 ? '，内参' : '';
+        const plateLabel = plateCount > 1 ? `，${plateCount}块板` : '';
         return {
-            name: `管一（${gene.name}）`,
+            name: `管一（${gene.name}${refLabel}${plateLabel}）`,
             gene: gene.name,
+            isReference: index === 0,
+            plateCount,
             baseWells,
             totalWells,
             sybr: totalWells * 10,
@@ -987,9 +1158,13 @@ function buildTube1Plans(groupCount, genesList, replicates, extraWells) {
     });
 }
 
-function buildTube2Plans(geneCount, groupsList, replicates, extraWells) {
+function buildTube2Plans(groupsList, extraWells, design) {
+    const wellsByGroup = {};
+    design.assignments.forEach(item => {
+        wellsByGroup[item.group] = (wellsByGroup[item.group] || 0) + 1;
+    });
     return groupsList.map(group => {
-        const baseWells = geneCount * replicates;
+        const baseWells = wellsByGroup[group.name] || 0;
         const totalWells = baseWells + extraWells;
         return {
             name: `管二（${group.name}）`,
@@ -1009,7 +1184,7 @@ function renderQpcrResults(data) {
     document.getElementById('qpcrResultContent').style.display = 'block';
 
     document.getElementById('qpcrSummaryText').innerText =
-        `共 ${data.reactionCount} 个反应孔（${data.cleanGroups.length} 组 × ${data.cleanGenes.length} 基因 × ${data.replicates} 平行）`;
+        `共 ${data.reactionCount} 个反应孔，${data.design.plateCount} 块板（首个基因 ${data.design.referenceGene} 为内参）`;
 
     renderQpcrAlerts(data);
     renderQpcrCalcTable(data);
@@ -1024,8 +1199,11 @@ function renderQpcrAlerts(data) {
     if (data.targetRnaNg < 500 || data.targetRnaNg > 1000) {
         alerts.push(`目标逆转录 RNA 含量为 ${formatQpcr(data.targetRnaNg)} ng，建议保持在 500-1000 ng。`);
     }
+    if (data.rtRnaVolUl > 14) {
+        alerts.push(`最低 RNA 浓度计算得到需加入 RNA ${formatQpcr(data.rtRnaVolUl)} µL，超出体系范围（20 µL 逆转录体系中 RNA 建议不超过 14 µL）。请降低目标逆转录 RNA 含量。`);
+    }
     if (data.rtRnaVolUl > 20) {
-        alerts.push(`计算得到 RNA 体积 ${formatQpcr(data.rtRnaVolUl)} µL，超过 20 µL 逆转录体系，请降低目标 RNA 含量或提高样本浓度。`);
+        alerts.push(`计算得到 RNA 体积 ${formatQpcr(data.rtRnaVolUl)} µL，超过 20 µL 逆转录体系。请降低目标逆转录 RNA 含量。`);
     }
     const noWaterGroups = data.rtPlans.filter(p => p.water < 0).map(p => p.group);
     if (noWaterGroups.length > 0) {
@@ -1033,6 +1211,9 @@ function renderQpcrAlerts(data) {
     }
     if (data.cdnaNgPerWell < 5 || data.cdnaNgPerWell > 10) {
         alerts.push(`每孔 cDNA 含量为 ${formatQpcr(data.cdnaNgPerWell)} ng，建议范围 5-10 ng。`);
+    }
+    if (data.design.duplicatedReference) {
+        alerts.push(`当前基因数量超过单块 96 孔板容量，已自动切换为 ${data.design.plateCount} 块板模式；内参 ${data.design.referenceGene} 已按两块板需求量配置。`);
     }
 
     const container = document.getElementById('qpcrAlerts');
@@ -1053,6 +1234,7 @@ function renderQpcrCalcTable(data) {
         ['需要加入 RNA 体积', `${formatQpcr(data.rtRnaVolUl)} µL`],
         ['逆转录 cDNA 浓度', `${formatQpcr(data.cdnaConc)} ng/µL`],
         ['每孔 cDNA 含量', `${formatQpcr(data.cdnaNgPerWell)} ng`],
+        ['排板模式', `${data.design.plateCount} 块 96 孔板${data.design.duplicatedReference ? `（内参 ${data.design.referenceGene} 两块板均配置）` : ''}`],
         ['建议稀释比例', ratioText]
     ];
     document.getElementById('qpcrCalcBody').innerHTML = rows.map(item => `
@@ -1136,35 +1318,51 @@ function renderQpcrTubePlans(data) {
 }
 
 function renderQpcrPlate(design) {
+    const html = design.plates.map(plate => renderSingleQpcrPlate(plate, design)).join('');
+    document.getElementById('qpcrPlateContainer').innerHTML = html;
+}
+
+function renderSingleQpcrPlate(plateDesign, design) {
     const rowNames = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
     const headCells = Array.from({ length: 12 }, (_, i) => `
         <th>
             <div class="axis-main">${i + 1}</div>
-            <div class="axis-note">${(design.colLabels && design.colLabels[i]) ? design.colLabels[i].split(' | ')[1] : '-'}</div>
+            <div class="axis-note">${(plateDesign.colLabels && plateDesign.colLabels[i]) ? plateDesign.colLabels[i].split(' | ')[1] : '-'}</div>
         </th>
     `).join('');
 
     const bodyRows = rowNames.map((rowName, rowIndex) => {
-        const rowCells = design.plate[rowIndex].map(cell => {
+        const rowCells = plateDesign.plate[rowIndex].map(cell => {
             if (!cell) return '<td class="plate-cell empty">-</td>';
-            return '<td class="plate-cell filled"><span class="well-dot">●</span></td>';
+            return `
+                <td class="plate-cell filled">
+                    <div class="plate-gene">${escapeHtml(cell.gene)}</div>
+                    <div class="plate-sample">${escapeHtml(cell.group)} R${cell.rep}</div>
+                </td>
+            `;
         }).join('');
         return `
             <tr>
                 <th>
                     <div class="axis-main">${rowName}</div>
-                    <div class="axis-note">${(design.rowLabels && design.rowLabels[rowIndex]) ? design.rowLabels[rowIndex].split(' | ')[1] : '-'}</div>
+                    <div class="axis-note">${(plateDesign.rowLabels && plateDesign.rowLabels[rowIndex]) ? plateDesign.rowLabels[rowIndex].split(' | ')[1] : '-'}</div>
                 </th>
                 ${rowCells}
             </tr>
         `;
     }).join('');
 
-    const layoutHint = design.useReadableLayout
-        ? '<div class="plate-hint">当前模式：行对应分组，列对应基因（保留 A-H 与 1-12）</div>'
-        : '<div class="plate-hint plate-hint-warn">当前为兼容排布（分组或基因数量较多），标签显示首个映射。若需严格一一对应，建议控制为 ≤8 组 且（基因数×平行数）≤12。</div>';
+    const plateGenes = plateDesign.genes.join('、');
+    const layoutText = plateDesign.layoutMode === 'gene-rows'
+        ? '行对应基因，列对应样本/平行孔'
+        : plateDesign.layoutMode === 'gene-rep-rows'
+            ? '行对应基因/平行孔，列对应样本'
+            : plateDesign.layoutMode === 'group-rep-rows'
+                ? '行对应样本/平行孔，列对应基因'
+                : '行对应样本，列对应基因/平行孔';
+    const layoutHint = `<div class="plate-hint">板 ${plateDesign.plateNumber}/${design.plateCount}：${layoutText}；包含 ${plateGenes}</div>`;
 
-    document.getElementById('qpcrPlateContainer').innerHTML = `
+    return `
         ${layoutHint}
         <div class="plate-wrap">
             <table class="plate-table">
@@ -1181,8 +1379,9 @@ function generateQpcrProtocolText(data) {
     const wellRows = getQpcrWellRows(data.design);
     let text = `实验：qPCR 配置 | ${date}\n`;
     text += `分组：${data.cleanGroups.map(g => g.name).join('、')}\n`;
-    text += `基因：${data.cleanGenes.map(g => g.name).join('、')}\n`;
-    text += `总反应孔：${data.reactionCount}（每组/基因 ${data.replicates} 平行）\n`;
+    text += `基因：${data.cleanGenes.map((g, index) => (index === 0 ? `${g.name}（内参）` : g.name)).join('、')}\n`;
+    text += `板数：${data.design.plateCount} 块${data.design.duplicatedReference ? `（内参 ${data.design.referenceGene} 覆盖两块板）` : ''}\n`;
+    text += `总反应孔：${data.reactionCount}（按实际排板计算）\n`;
     text += `富余孔：+${data.extraWells}\n\n`;
     text += `[1. 逆转录与稀释计算]\n`;
     text += `  - 最低 RNA 浓度：${formatQpcr(data.minRnaConc)} ng/µL（${data.minRnaGroup.name}）\n`;
@@ -1223,9 +1422,9 @@ function generateQpcrProtocolText(data) {
     text += `  - 步骤1：按基因向对应孔加入 15 µL 管一\n`;
     text += `  - 步骤2：按分组向对应孔加入 5 µL 管二\n`;
     text += `  - 步骤3：轻拍/短暂离心后上机\n`;
-    text += `\n[8. 96 孔板排序（孔位 -> 分组 / 基因 / 平行）]\n`;
+    text += `\n[8. 96 孔板排序（板号 / 孔位 -> 分组 / 基因 / 平行）]\n`;
     wellRows.forEach(item => {
-        text += `  - ${item.well} -> ${item.group} / ${item.gene} / Rep${item.rep}\n`;
+        text += `  - 板${item.plate} ${item.well} -> ${item.group} / ${item.gene} / Rep${item.rep}\n`;
     });
 
     document.getElementById('qpcrProtocolText').innerText = text;
@@ -1260,6 +1459,217 @@ function downloadQpcrPrintHtml() {
     downloadBlobFile(getQpcrExportFilename('print', 'html'), html, 'text/html;charset=utf-8');
 }
 
+function collectQpcrConfig() {
+    if (document.activeElement && typeof document.activeElement.blur === 'function') {
+        document.activeElement.blur();
+    }
+    return {
+        app: 'biotools-qpcr',
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        module: 'qpcr',
+        params: {
+            targetRnaNg: parseFloat(document.getElementById('qpcrTargetRnaNg').value) || 0,
+            cdnaNgPerWell: parseFloat(document.getElementById('qpcrCdnaNgPerWell').value) || 0,
+            replicates: parseInt(document.getElementById('qpcrReplicates').value, 10) || 0,
+            extraWells: parseInt(document.getElementById('qpcrExtraWells').value, 10) || 0
+        },
+        groups: qpcrGroups.map(group => ({
+            id: group.id,
+            name: group.name,
+            rnaConc: parseFloat(group.rnaConc) || 0
+        })),
+        genes: qpcrGenes.map(gene => ({
+            id: gene.id,
+            name: gene.name
+        }))
+    };
+}
+
+function exportQpcrConfig() {
+    const config = collectQpcrConfig();
+    downloadBlobFile(getQpcrExportFilename('config', 'json'), JSON.stringify(config, null, 2), 'application/json;charset=utf-8');
+}
+
+function triggerImportQpcrConfig() {
+    document.getElementById('qpcrConfigFile').click();
+}
+
+function importQpcrConfig(event) {
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+        try {
+            const config = JSON.parse(reader.result);
+            applyQpcrConfig(config);
+            calculateQpcr();
+        } catch (error) {
+            alert('配置文件无法读取，请确认导入的是本工具导出的 qPCR JSON 文件。');
+        } finally {
+            event.target.value = '';
+        }
+    };
+    reader.readAsText(file);
+}
+
+function applyQpcrConfig(config) {
+    if (!config || config.module !== 'qpcr' || !config.params || !Array.isArray(config.groups) || !Array.isArray(config.genes)) {
+        throw new Error('Invalid qPCR config');
+    }
+    document.getElementById('qpcrTargetRnaNg').value = parseNumber(config.params.targetRnaNg, 1000);
+    document.getElementById('qpcrCdnaNgPerWell').value = parseNumber(config.params.cdnaNgPerWell, 10);
+    document.getElementById('qpcrReplicates').value = parseInt(parseNumber(config.params.replicates, 3), 10);
+    document.getElementById('qpcrExtraWells').value = parseInt(parseNumber(config.params.extraWells, 3), 10);
+
+    qpcrGroups = config.groups.map((group, index) => ({
+        id: Number.isFinite(parseFloat(group.id)) ? parseFloat(group.id) : Date.now() + index,
+        name: String(group.name || `Group-${index + 1}`),
+        rnaConc: parseNumber(group.rnaConc, 100)
+    }));
+    qpcrGenes = config.genes.map((gene, index) => ({
+        id: Number.isFinite(parseFloat(gene.id)) ? parseFloat(gene.id) : Date.now() + index,
+        name: String(gene.name || `Gene-${index + 1}`)
+    }));
+    if (qpcrGroups.length === 0) {
+        qpcrGroups = [{ id: Date.now(), name: 'Group-1', rnaConc: 100 }];
+    }
+    if (qpcrGenes.length === 0) {
+        qpcrGenes = [{ id: Date.now(), name: 'Gene-1' }];
+    }
+    renderQpcrGroups();
+    renderQpcrGenes();
+}
+
+function exportQpcrPrintPdf() {
+    lastQpcrData = null;
+    calculateQpcr();
+    if (!lastQpcrData) return;
+    renderQpcrPrintArea(lastQpcrData);
+    window.print();
+}
+
+function renderQpcrPrintArea(data) {
+    const dilutionWaterFor20ul = getDilutionWaterFor20ul(data.dilutionRatio);
+    const rtHead = data.rtPlans.map(plan => `<th>${escapeHtml(plan.group)}</th>`).join('');
+    const rtRow = (name, getter) => `
+        <tr>
+            <td>${escapeHtml(name)}</td>
+            ${data.rtPlans.map(plan => `<td>${escapeHtml(getter(plan))}</td>`).join('')}
+        </tr>
+    `;
+    const tube1Rows = data.tube1Plans.map(plan => `
+        <tr>
+            <td>${escapeHtml(plan.name)}</td>
+            <td>${escapeHtml(`${plan.baseWells} + ${data.extraWells}`)}</td>
+            <td>${escapeHtml(formatQpcr(plan.sybr))}</td>
+            <td>${escapeHtml(formatQpcr(plan.water))}</td>
+            <td>${escapeHtml(formatQpcr(plan.primerF))}</td>
+            <td>${escapeHtml(formatQpcr(plan.primerR))}</td>
+            <td>${escapeHtml(formatQpcr(plan.totalVol))}</td>
+        </tr>
+    `).join('');
+    const tube2Rows = data.tube2Plans.map(plan => `
+        <tr>
+            <td>${escapeHtml(plan.name)}</td>
+            <td>${escapeHtml(`${plan.baseWells} + ${data.extraWells}`)}</td>
+            <td>${escapeHtml(formatQpcr(plan.cdna))}</td>
+            <td>${escapeHtml(formatQpcr(plan.water))}</td>
+            <td>${escapeHtml(formatQpcr(plan.totalVol))}</td>
+        </tr>
+    `).join('');
+    const plateSections = (data.design.plates || [data.design]).map(plateDesign => {
+        const plateHead = Array.from({ length: 12 }, (_, i) => {
+            const raw = (plateDesign.colLabels && plateDesign.colLabels[i]) ? plateDesign.colLabels[i] : '';
+            const mapped = raw.includes(' | ') ? raw.split(' | ')[1] : '-';
+            return `<th>${i + 1}<br><span>${escapeHtml(mapped)}</span></th>`;
+        }).join('');
+        const plateBody = plateDesign.plate.map((row, rowIndex) => {
+            const raw = (plateDesign.rowLabels && plateDesign.rowLabels[rowIndex]) ? plateDesign.rowLabels[rowIndex] : '';
+            const mapped = raw.includes(' | ') ? raw.split(' | ')[1] : '-';
+            return `
+                <tr>
+                    <th>${String.fromCharCode(65 + rowIndex)}<br><span>${escapeHtml(mapped)}</span></th>
+                    ${row.map(cell => `
+                        <td class="${cell ? 'plate-cell-print filled' : 'plate-cell-print'}">
+                            ${cell ? `<strong>${escapeHtml(cell.gene)}</strong><br><span>${escapeHtml(cell.group)} R${cell.rep}</span>` : '-'}
+                        </td>
+                    `).join('')}
+                </tr>
+            `;
+        }).join('');
+        return `
+            <h3 class="print-plate-title">板 ${plateDesign.plateNumber || 1}/${data.design.plateCount}：${escapeHtml((plateDesign.genes || []).join('、'))}</h3>
+            <table class="print-plate-table">
+                <thead><tr><th></th>${plateHead}</tr></thead>
+                <tbody>${plateBody}</tbody>
+            </table>
+        `;
+    }).join('');
+
+    document.getElementById('printArea').innerHTML = `
+        <div class="print-sheet">
+            <header class="print-header">
+                <div>
+                    <h1>qPCR 配置打印单</h1>
+                    <p>${escapeHtml(new Date().toLocaleDateString('zh-CN'))}</p>
+                </div>
+                <div class="print-meta">
+                    <div>分组 ${data.cleanGroups.length} 个 | 基因 ${data.cleanGenes.length} 个</div>
+                    <div>总反应孔 ${data.reactionCount}</div>
+                    <div>${data.design.plateCount} 块板 | 平行 ${data.replicates} | 富余 +${data.extraWells}</div>
+                </div>
+            </header>
+            <section class="print-block">
+                <h2>1. 逆转录与稀释计算</h2>
+                <table>
+                    <tbody>
+                        <tr><td>最低 RNA 浓度</td><td>${formatQpcr(data.minRnaConc)} ng/µL（${escapeHtml(data.minRnaGroup.name)}）</td></tr>
+                        <tr><td>目标 RNA 含量</td><td>${formatQpcr(data.targetRnaNg)} ng</td></tr>
+                        <tr><td>最低浓度样本 RNA 体积</td><td>${formatQpcr(data.rtRnaVolUl)} µL</td></tr>
+                        <tr><td>建议稀释比例</td><td>${data.dilutionRatio >= 1 ? `1:${formatQpcr(data.dilutionRatio)}` : `浓度不足（比值 ${formatQpcr(data.dilutionRatio)}）`}</td></tr>
+                    </tbody>
+                </table>
+            </section>
+            <section class="print-block">
+                <h2>2. 逆转录体系（20 µL/样品）</h2>
+                <table>
+                    <thead><tr><th>组分</th>${rtHead}</tr></thead>
+                    <tbody>
+                        ${rtRow('RNA 体积 (µL)', p => formatQpcr(p.rnaVol))}
+                        ${rtRow('gDNA Mix (µL)', p => formatQpcr(p.gdnaMix))}
+                        ${rtRow('5X Evo Reaction Mix (µL)', p => formatQpcr(p.evoMix))}
+                        ${rtRow('无酶水 (µL)', p => formatQpcr(p.water))}
+                        ${rtRow('总量 (µL)', () => '20.00')}
+                        ${rtRow('cDNA 稀释加无酶水 (µL)', () => formatQpcr(dilutionWaterFor20ul))}
+                    </tbody>
+                </table>
+            </section>
+            <section class="print-block">
+                <h2>3. qPCR 上板体系 A（引物预混管）</h2>
+                <table>
+                    <thead><tr><th>名称</th><th>孔数</th><th>SYBR</th><th>无酶水</th><th>Primer F</th><th>Primer R</th><th>总量</th></tr></thead>
+                    <tbody>${tube1Rows}</tbody>
+                </table>
+            </section>
+            <section class="print-block">
+                <h2>4. qPCR 上板体系 B（cDNA 样品管）</h2>
+                <table>
+                    <thead><tr><th>名称</th><th>孔数</th><th>cDNA</th><th>无酶水</th><th>总量</th></tr></thead>
+                    <tbody>${tube2Rows}</tbody>
+                </table>
+            </section>
+            <section class="print-block">
+                <h2>5. 96 孔板排布示例</h2>
+                ${plateSections}
+            </section>
+            <section class="print-note">
+                上板顺序：每孔先加 15 µL 体系 A，再加 5 µL 体系 B；轻拍混匀或短暂离心后上机。
+            </section>
+        </div>
+    `;
+}
+
 function getDilutionWaterFor20ul(dilutionRatio) {
     return dilutionRatio > 1 ? 20 * (dilutionRatio - 1) : 0;
 }
@@ -1267,18 +1677,22 @@ function getDilutionWaterFor20ul(dilutionRatio) {
 function getQpcrWellRows(design) {
     const rows = [];
     const rowNames = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
-    for (let rowIndex = 0; rowIndex < 8; rowIndex += 1) {
-        for (let colIndex = 0; colIndex < 12; colIndex += 1) {
-            const cell = design.plate[rowIndex][colIndex];
-            if (!cell) continue;
-            rows.push({
-                well: `${rowNames[rowIndex]}${colIndex + 1}`,
-                group: cell.group,
-                gene: cell.gene,
-                rep: cell.rep
-            });
+    const plates = design.plates || [design];
+    plates.forEach(plateDesign => {
+        for (let rowIndex = 0; rowIndex < 8; rowIndex += 1) {
+            for (let colIndex = 0; colIndex < 12; colIndex += 1) {
+                const cell = plateDesign.plate[rowIndex][colIndex];
+                if (!cell) continue;
+                rows.push({
+                    plate: plateDesign.plateNumber || 1,
+                    well: `${rowNames[rowIndex]}${colIndex + 1}`,
+                    group: cell.group,
+                    gene: cell.gene,
+                    rep: cell.rep
+                });
+            }
         }
-    }
+    });
     return rows;
 }
 
@@ -1322,17 +1736,26 @@ function buildQpcrPrintHtml(data) {
             ${data.rtPlans.map(plan => `<td>${escapeHtml(getter(plan))}</td>`).join('')}
         </tr>
     `;
-    const plateHead = Array.from({ length: 12 }, (_, i) => {
-        const raw = (data.design.colLabels && data.design.colLabels[i]) ? data.design.colLabels[i] : '';
-        const mapped = raw.includes(' | ') ? raw.split(' | ')[1] : '-';
-        return `<th>${i + 1} (${escapeHtml(mapped)})</th>`;
+    const plateSections = (data.design.plates || [data.design]).map(plateDesign => {
+        const plateHead = Array.from({ length: 12 }, (_, i) => {
+            const raw = (plateDesign.colLabels && plateDesign.colLabels[i]) ? plateDesign.colLabels[i] : '';
+            const mapped = raw.includes(' | ') ? raw.split(' | ')[1] : '-';
+            return `<th>${i + 1} (${escapeHtml(mapped)})</th>`;
+        }).join('');
+        const plateBody = plateDesign.plate.map((row, rowIndex) => `
+            <tr>
+                <th>${String.fromCharCode(65 + rowIndex)} (${escapeHtml((plateDesign.rowLabels && plateDesign.rowLabels[rowIndex]) ? plateDesign.rowLabels[rowIndex].split(' | ')[1] : '-')})</th>
+                ${row.map(cell => `<td>${cell ? `${escapeHtml(cell.gene)}<br><small>${escapeHtml(cell.group)} R${cell.rep}</small>` : '-'}</td>`).join('')}
+            </tr>
+        `).join('');
+        return `
+            <h3>板 ${plateDesign.plateNumber || 1}/${data.design.plateCount}：${escapeHtml((plateDesign.genes || []).join('、'))}</h3>
+            <table>
+                <thead><tr><th></th>${plateHead}</tr></thead>
+                <tbody>${plateBody}</tbody>
+            </table>
+        `;
     }).join('');
-    const plateBody = data.design.plate.map((row, rowIndex) => `
-        <tr>
-            <th>${String.fromCharCode(65 + rowIndex)} (${escapeHtml((data.design.rowLabels && data.design.rowLabels[rowIndex]) ? data.design.rowLabels[rowIndex].split(' | ')[1] : '-')})</th>
-            ${row.map(cell => `<td>${cell ? '●' : '-'}</td>`).join('')}
-        </tr>
-    `).join('');
 
     const tube1Rows = data.tube1Plans.map(plan => `
         <tr>
@@ -1380,8 +1803,8 @@ th { background: #f8fafc; }
 <h1>qPCR 实验打印记录</h1>
 <p>日期：${escapeHtml(new Date().toLocaleString('zh-CN'))}</p>
 <p>分组：${escapeHtml(data.cleanGroups.map(g => g.name).join('、'))}</p>
-<p>基因：${escapeHtml(data.cleanGenes.map(g => g.name).join('、'))}</p>
-<p>总反应孔：${escapeHtml(`${data.reactionCount}`)}（每组/基因 ${escapeHtml(`${data.replicates}`)} 平行）</p>
+<p>基因：${escapeHtml(data.cleanGenes.map((g, index) => (index === 0 ? `${g.name}（内参）` : g.name)).join('、'))}</p>
+<p>板数：${escapeHtml(`${data.design.plateCount}`)}；总反应孔：${escapeHtml(`${data.reactionCount}`)}（按实际排板计算）</p>
 
 <h2>1. 逆转录体系配置（20 µL/样品）</h2>
 <table class="rt">
@@ -1412,10 +1835,7 @@ ${rtRow('cDNA 稀释加无酶水 (µL)', () => formatQpcr(dilutionWaterFor20ul))
 </table>
 
 <h2>4. 96 孔板排布示意</h2>
-<table>
-<thead><tr><th></th>${plateHead}</tr></thead>
-<tbody>${plateBody}</tbody>
-</table>
+${plateSections}
 </body>
 </html>`;
 }
