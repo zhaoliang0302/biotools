@@ -14,6 +14,11 @@ const PRESETS = {
     }
 };
 
+const TIC_PRESETS = {
+    '6well': { name: '六孔板', volPerWell: 2 },
+    '12well': { name: '12孔板', volPerWell: 1 }
+};
+
 let groups = [
     { id: 1, name: 'siNC', wells: 1, optiB: 125, sirnas: [{ id: 11, name: 'siNC', volume: 5 }] },
     { id: 1002, name: 'siRNA-1', wells: 3, optiB: 125, sirnas: [{ id: 10021, name: 'siRNA-1', volume: 5 }] }
@@ -31,10 +36,18 @@ let qpcrGenes = [
 
 let lastQpcrData = null;
 let lastLipoPlan = null;
+let lastTicData = null;
+
+let ticGroups = [
+    { id: 1, name: 'TIC 1X', wells: 6, factor: 1 },
+    { id: 2, name: 'TIC 1/2', wells: 0, factor: 0.5 }
+];
 
 document.addEventListener('DOMContentLoaded', () => {
     loadPreset();
+    loadTicPreset();
     renderGroups();
+    renderTicGroups();
     renderQpcrGroups();
     renderQpcrGenes();
     bindTabs();
@@ -505,8 +518,6 @@ function exportLipoPrintPdf() {
 }
 
 function renderLipoPrintArea(plan) {
-    const date = new Date().toLocaleDateString('zh-CN');
-    const totalActual = plan.groupResults.reduce((sum, group) => sum + group.wells, 0);
     const tubeARows = `
         <tr><td>Opti-MEM</td><td>${formatNum(plan.tubeA.optiA)} µL</td></tr>
         <tr><td>Lipo3000</td><td>${formatNum(plan.tubeA.lipo)} µL</td></tr>
@@ -535,17 +546,6 @@ function renderLipoPrintArea(plan) {
 
     document.getElementById('printArea').innerHTML = `
         <div class="print-sheet">
-            <header class="print-header">
-                <div>
-                    <h1>Lipo3000 siRNA 转染配制单</h1>
-                    <p>${escapeHtml(plan.settings.name)} | ${date}</p>
-                </div>
-                <div class="print-meta">
-                    <div>分组 ${plan.groupResults.length} 个</div>
-                    <div>实际 ${formatNum(totalActual)} 孔</div>
-                    <div>A管富余 +${formatNum(plan.tubeAExtra)} | B管富余 +${formatNum(plan.groupExtra)}/组</div>
-                </div>
-            </header>
             <section class="print-block">
                 <h2>1. A 管共用混合液</h2>
                 <table><thead><tr><th>成分</th><th>最终配制量</th></tr></thead><tbody>${tubeARows}</tbody></table>
@@ -566,9 +566,82 @@ function parseNumber(value, fallback) {
     return Number.isFinite(num) ? num : fallback;
 }
 
+function loadTicPreset() {
+    const type = document.getElementById('ticPlateType').value;
+    const preset = TIC_PRESETS[type] || TIC_PRESETS['6well'];
+    document.getElementById('ticVolPerWell').value = preset.volPerWell;
+}
+
+function renderTicGroups() {
+    const list = document.getElementById('ticGroupsList');
+    if (!list) return;
+    list.innerHTML = '';
+    ticGroups.forEach((group, index) => {
+        const div = document.createElement('div');
+        div.className = 'group-item';
+        div.innerHTML = `
+            <div class="group-main-row tic-group-row">
+                <input type="text" placeholder="处理组名称" value="${escapeHtml(group.name)}" onchange="updateTicGroup(${index}, 'name', this.value)">
+                <div class="input-with-unit" style="margin-bottom:0;">
+                    <input type="number" placeholder="孔数" value="${group.wells}" min="0" step="1" oninput="updateTicGroup(${index}, 'wells', this.value)" onchange="updateTicGroup(${index}, 'wells', this.value)">
+                    <span style="font-size:0.75rem;">孔</span>
+                </div>
+                <div class="input-with-unit" style="margin-bottom:0;">
+                    <input type="number" placeholder="TIC倍数" value="${group.factor}" min="0" max="1" step="0.01" oninput="updateTicGroup(${index}, 'factor', this.value)" onchange="updateTicGroup(${index}, 'factor', this.value)">
+                    <span style="font-size:0.75rem;">x</span>
+                </div>
+                <button class="btn-icon" onclick="removeTicGroup(${index})" title="删除处理组"><i class="fas fa-trash-alt"></i></button>
+            </div>
+        `;
+        list.appendChild(div);
+    });
+}
+
+function updateTicGroup(index, field, value) {
+    if (!ticGroups[index]) return;
+    if (field === 'wells' || field === 'factor') {
+        ticGroups[index][field] = parseFloat(value) || 0;
+    } else {
+        ticGroups[index][field] = value;
+    }
+}
+
+function addTicGroup() {
+    const id = Date.now();
+    ticGroups.push({ id, name: `TIC 1/${ticGroups.length + 1}`, wells: 1, factor: 0.5 });
+    renderTicGroups();
+}
+
+function syncTicGroupsFromDom() {
+    const items = document.querySelectorAll('#ticGroupsList .group-item');
+    if (!items.length) return;
+    ticGroups = Array.from(items).map((item, index) => {
+        const nameInput = item.querySelector('input[placeholder="处理组名称"]');
+        const wellsInput = item.querySelector('input[placeholder="孔数"]');
+        const factorInput = item.querySelector('input[placeholder="TIC倍数"]');
+        const existing = ticGroups[index] || {};
+        return {
+            id: existing.id || Date.now() + index,
+            name: nameInput ? nameInput.value : (existing.name || `TIC-${index + 1}`),
+            wells: wellsInput ? parseFloat(wellsInput.value) || 0 : parseFloat(existing.wells) || 0,
+            factor: factorInput ? parseFloat(factorInput.value) || 0 : parseFloat(existing.factor) || 0
+        };
+    });
+}
+
+function removeTicGroup(index) {
+    if (ticGroups.length <= 1) {
+        alert('至少保留一个处理组。');
+        return;
+    }
+    ticGroups.splice(index, 1);
+    renderTicGroups();
+}
+
 function calculateTic() {
-    const wells = parseFloat(document.getElementById('ticWells').value) || 0;
+    syncTicGroupsFromDom();
     const extraWells = parseFloat(document.getElementById('ticExtraWells').value) || 0;
+    const mixExtraWells = parseFloat(document.getElementById('ticMixExtraWells').value) || 0;
     const volPerWell = parseFloat(document.getElementById('ticVolPerWell').value) || 0;
 
     const tnfStock = parseFloat(document.getElementById('ticTnfStock').value) || 0;
@@ -579,8 +652,17 @@ function calculateTic() {
     const il1Work = parseFloat(document.getElementById('ticIl1Work').value) || 0;
     const c1qWork = parseFloat(document.getElementById('ticC1qWork').value) || 0;
 
-    if (wells <= 0 || volPerWell <= 0) {
-        alert('请输入有效的孔数和每孔体积。');
+    const cleanGroups = ticGroups
+        .map((group, index) => ({
+            id: group.id || Date.now() + index,
+            name: String(group.name || `TIC-${index + 1}`),
+            wells: parseFloat(group.wells) || 0,
+            factor: parseFloat(group.factor) || 0
+        }))
+        .filter(group => group.wells > 0);
+
+    if (cleanGroups.length === 0 || volPerWell <= 0) {
+        alert('请输入有效的处理组孔数和每孔体积。');
         return;
     }
     if (tnfStock <= 0 || il1Stock <= 0 || c1qStockMg <= 0) {
@@ -591,15 +673,38 @@ function calculateTic() {
         alert('请输入有效的工作浓度。');
         return;
     }
+    if (cleanGroups.some(group => group.factor < 0 || group.factor > 1)) {
+        alert('TIC 倍数请输入 0 到 1 之间的数值，例如 1、0.5、0.333。');
+        return;
+    }
 
-    const totalWells = wells + extraWells;
-    const totalVolMl = totalWells * volPerWell;
+    const groupPlans = cleanGroups.map(group => {
+        const calcWells = group.wells + extraWells;
+        const totalVolMl = calcWells * volPerWell;
+        return {
+            ...group,
+            calcWells,
+            totalVolMl,
+            ticMixMl: totalVolMl * group.factor,
+            dilutionMediumMl: totalVolMl * (1 - group.factor)
+        };
+    });
+    const totalActualWells = cleanGroups.reduce((sum, group) => sum + group.wells, 0);
+    const totalCalcWells = groupPlans.reduce((sum, group) => sum + group.calcWells, 0);
+    const totalFinalVolMl = groupPlans.reduce((sum, group) => sum + group.totalVolMl, 0);
+    const oneXNeededMl = groupPlans.reduce((sum, group) => sum + group.ticMixMl, 0);
+    const oneXExtraMl = mixExtraWells * volPerWell;
+    const oneXVolMl = oneXNeededMl + oneXExtraMl;
+    if (oneXVolMl <= 0) {
+        alert('至少需要一个处理组的 TIC 倍数大于 0。');
+        return;
+    }
 
     const c1qStockNg = c1qStockMg * 1000000;
-    const tnfVolMl = (tnfWork / tnfStock) * totalVolMl;
-    const il1VolMl = (il1Work / il1Stock) * totalVolMl;
-    const c1qVolMl = (c1qWork / c1qStockNg) * totalVolMl;
-    let mediumVolMl = totalVolMl - tnfVolMl - il1VolMl - c1qVolMl;
+    const tnfVolMl = (tnfWork / tnfStock) * oneXVolMl;
+    const il1VolMl = (il1Work / il1Stock) * oneXVolMl;
+    const c1qVolMl = (c1qWork / c1qStockNg) * oneXVolMl;
+    let mediumVolMl = oneXVolMl - tnfVolMl - il1VolMl - c1qVolMl;
     if (mediumVolMl < -1e-6) {
         alert('工作浓度过高，培养基体积为负，请检查参数。');
         return;
@@ -607,23 +712,36 @@ function calculateTic() {
     if (mediumVolMl < 0) mediumVolMl = 0;
 
     const mix = {
-        totalWells,
-        totalVolMl,
+        plateType: document.getElementById('ticPlateType').value,
+        plateName: (TIC_PRESETS[document.getElementById('ticPlateType').value] || TIC_PRESETS['6well']).name,
+        volPerWell,
+        extraWells,
+        mixExtraWells,
+        totalActualWells,
+        totalCalcWells,
+        totalFinalVolMl,
+        oneXNeededMl,
+        oneXExtraMl,
+        oneXVolMl,
         tnfVolMl,
         il1VolMl,
         c1qVolMl,
-        mediumVolMl
+        mediumVolMl,
+        dilutionMediumMl: groupPlans.reduce((sum, group) => sum + group.dilutionMediumMl, 0),
+        groupPlans,
+        concentrations: { tnfStock, il1Stock, c1qStockMg, tnfWork, il1Work, c1qWork }
     };
 
     renderTicResults(mix);
 }
 
 function renderTicResults(mix) {
+    lastTicData = mix;
     document.getElementById('ticResultPlaceholder').style.display = 'none';
     document.getElementById('ticResultContent').style.display = 'block';
 
     document.getElementById('ticSummaryText').innerText =
-        `实际 ${mix.totalWells} 孔，总体积 ${formatMl(mix.totalVolMl)} mL（含富余）`;
+        `${mix.plateName} | 实际 ${mix.totalActualWells} 孔，配 ${formatMl(mix.totalCalcWells)} 孔，最终体系 ${formatMl(mix.totalFinalVolMl)} mL`;
 
     const rows = [
         { name: '培养基', vol: mix.mediumVolMl },
@@ -642,9 +760,9 @@ function renderTicResults(mix) {
         `;
     }).join('');
 
-    const tubePlan = buildTubePlan(mix.totalVolMl);
+    const tubePlan = buildTubePlan(mix.oneXVolMl);
     document.getElementById('ticTubeSuggestion').innerHTML = tubePlan.summary;
-    document.getElementById('ticPerTubeBody').innerHTML = buildPerTubeRows(mix, tubePlan);
+    document.getElementById('ticPerTubeBody').innerHTML = buildTicGroupRows(mix);
 
     generateTicProtocolText(mix, tubePlan);
 }
@@ -673,19 +791,16 @@ function chooseTubeSize(totalVolMl) {
     return bestSize;
 }
 
-function buildPerTubeRows(mix, tubePlan) {
-    const factor = tubePlan.perTube / mix.totalVolMl;
-    const rows = [
-        { name: '培养基', vol: mix.mediumVolMl * factor },
-        { name: 'TNF', vol: mix.tnfVolMl * factor },
-        { name: 'IL-1α', vol: mix.il1VolMl * factor },
-        { name: 'C1q', vol: mix.c1qVolMl * factor }
-    ];
-    return rows.map(item => {
+function buildTicGroupRows(mix) {
+    return mix.groupPlans.map(group => {
         return `
             <tr>
-                <td>${item.name}</td>
-                <td class="val-highlight">${formatVol(item.vol)}</td>
+                <td>${escapeHtml(group.name)}</td>
+                <td>${formatTicFactor(group.factor)}</td>
+                <td>${formatMl(group.wells)} + ${formatMl(mix.extraWells)}</td>
+                <td class="val-highlight">${formatVol(group.ticMixMl)}</td>
+                <td>${formatVol(group.dilutionMediumMl)}</td>
+                <td>${formatVol(group.totalVolMl)}</td>
             </tr>
         `;
     }).join('');
@@ -694,22 +809,35 @@ function buildPerTubeRows(mix, tubePlan) {
 function generateTicProtocolText(mix, tubePlan) {
     const date = new Date().toLocaleDateString('zh-CN');
     let text = `实验：TIC 配制 | ${date}\n`;
-    text += `孔数（含富余）：${mix.totalWells}\n`;
-    text += `总体积：${formatMl(mix.totalVolMl)} mL\n\n`;
-    text += `[TIC 混合液]\n`;
+    text += `规格：${mix.plateName}，每孔 ${formatMl(mix.volPerWell)} mL\n`;
+    text += `实际孔数：${mix.totalActualWells}；配制孔数：${formatMl(mix.totalCalcWells)}（每组富余 +${formatMl(mix.extraWells)}）\n`;
+    text += `最终培养体系：${formatMl(mix.totalFinalVolMl)} mL\n\n`;
+    text += `[1X TIC 工作液]\n`;
+    text += `  - 各组分装需要：${formatVol(mix.oneXNeededMl)}\n`;
+    text += `  - 分装富余：${formatVol(mix.oneXExtraMl)}（+${formatMl(mix.mixExtraWells)}孔）\n`;
+    text += `  - 实际配制 1X 工作液：${formatVol(mix.oneXVolMl)}\n`;
     text += `  - 培养基： ${formatVol(mix.mediumVolMl)}\n`;
     text += `  - TNF：   ${formatVol(mix.tnfVolMl)}\n`;
     text += `  - IL-1α： ${formatVol(mix.il1VolMl)}\n`;
     text += `  - C1q：   ${formatVol(mix.c1qVolMl)}\n`;
     text += `\n[管子建议]\n  - ${tubePlan.summary}\n`;
-    if (tubePlan.tubeCount > 1) {
-        text += `\n[每管配制量]\n`;
-        text += `  - 培养基： ${formatVol(mix.mediumVolMl * (tubePlan.perTube / mix.totalVolMl))}\n`;
-        text += `  - TNF：   ${formatVol(mix.tnfVolMl * (tubePlan.perTube / mix.totalVolMl))}\n`;
-        text += `  - IL-1α： ${formatVol(mix.il1VolMl * (tubePlan.perTube / mix.totalVolMl))}\n`;
-        text += `  - C1q：   ${formatVol(mix.c1qVolMl * (tubePlan.perTube / mix.totalVolMl))}\n`;
-    }
+    text += `\n[各组稀释与加样]\n`;
+    mix.groupPlans.forEach(group => {
+        text += `  - ${group.name}（${formatTicFactor(group.factor)}，${formatMl(group.wells)}孔，配${formatMl(group.calcWells)}孔）：`;
+        text += `1X TIC ${formatVol(group.ticMixMl)} + 培养基 ${formatVol(group.dilutionMediumMl)}；每孔加入 ${formatMl(mix.volPerWell)} mL\n`;
+    });
     document.getElementById('ticProtocolText').innerText = text;
+}
+
+function formatTicFactor(factor) {
+    if (Math.abs(factor - 1) < 0.001) return '1X';
+    if (factor > 0) {
+        const denominator = 1 / factor;
+        if (Math.abs(denominator - Math.round(denominator)) < 0.02) {
+            return `1/${Math.round(denominator)}X`;
+        }
+    }
+    return `${formatMl(factor)}X`;
 }
 
 function formatMl(num) {
@@ -728,6 +856,154 @@ function copyTicProtocol() {
     navigator.clipboard.writeText(text).then(() => {
         alert("已复制到剪贴板");
     });
+}
+
+function collectTicConfig() {
+    if (document.activeElement && typeof document.activeElement.blur === 'function') {
+        document.activeElement.blur();
+    }
+    syncTicGroupsFromDom();
+    return {
+        app: 'biotools-tic',
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        module: 'tic',
+        plateType: document.getElementById('ticPlateType').value,
+        params: {
+            volPerWell: parseFloat(document.getElementById('ticVolPerWell').value) || 0,
+            extraWells: parseFloat(document.getElementById('ticExtraWells').value) || 0,
+            mixExtraWells: parseFloat(document.getElementById('ticMixExtraWells').value) || 0,
+            tnfStock: parseFloat(document.getElementById('ticTnfStock').value) || 0,
+            il1Stock: parseFloat(document.getElementById('ticIl1Stock').value) || 0,
+            c1qStockMg: parseFloat(document.getElementById('ticC1qStock').value) || 0,
+            tnfWork: parseFloat(document.getElementById('ticTnfWork').value) || 0,
+            il1Work: parseFloat(document.getElementById('ticIl1Work').value) || 0,
+            c1qWork: parseFloat(document.getElementById('ticC1qWork').value) || 0
+        },
+        groups: ticGroups.map(group => ({
+            id: group.id,
+            name: group.name,
+            wells: parseFloat(group.wells) || 0,
+            factor: parseFloat(group.factor) || 0
+        }))
+    };
+}
+
+function exportTicConfig() {
+    const config = collectTicConfig();
+    downloadBlobFile(getTicExportFilename('config', 'json'), JSON.stringify(config, null, 2), 'application/json;charset=utf-8');
+}
+
+function triggerImportTicConfig() {
+    document.getElementById('ticConfigFile').click();
+}
+
+function importTicConfig(event) {
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+        try {
+            const config = JSON.parse(reader.result);
+            applyTicConfig(config);
+            calculateTic();
+        } catch (error) {
+            alert('配置文件无法读取，请确认导入的是本工具导出的 TIC JSON 文件。');
+        } finally {
+            event.target.value = '';
+        }
+    };
+    reader.readAsText(file);
+}
+
+function applyTicConfig(config) {
+    if (!config || config.module !== 'tic' || !config.params || !Array.isArray(config.groups)) {
+        throw new Error('Invalid TIC config');
+    }
+    const plateType = TIC_PRESETS[config.plateType] ? config.plateType : '6well';
+    document.getElementById('ticPlateType').value = plateType;
+    document.getElementById('ticVolPerWell').value = parseNumber(config.params.volPerWell, TIC_PRESETS[plateType].volPerWell);
+    document.getElementById('ticExtraWells').value = parseNumber(config.params.extraWells, 1);
+    document.getElementById('ticMixExtraWells').value = parseNumber(config.params.mixExtraWells, 0.5);
+    document.getElementById('ticTnfStock').value = parseNumber(config.params.tnfStock, 2500);
+    document.getElementById('ticIl1Stock').value = parseNumber(config.params.il1Stock, 2500);
+    document.getElementById('ticC1qStock').value = parseNumber(config.params.c1qStockMg, 1.04);
+    document.getElementById('ticTnfWork').value = parseNumber(config.params.tnfWork, 30);
+    document.getElementById('ticIl1Work').value = parseNumber(config.params.il1Work, 3);
+    document.getElementById('ticC1qWork').value = parseNumber(config.params.c1qWork, 400);
+    ticGroups = config.groups.map((group, index) => ({
+        id: Number.isFinite(parseFloat(group.id)) ? parseFloat(group.id) : Date.now() + index,
+        name: String(group.name || `TIC-${index + 1}`),
+        wells: parseNumber(group.wells, 1),
+        factor: Math.min(1, Math.max(0, parseNumber(group.factor, 1)))
+    }));
+    if (ticGroups.length === 0) {
+        ticGroups = [{ id: Date.now(), name: 'TIC 1X', wells: 1, factor: 1 }];
+    }
+    renderTicGroups();
+}
+
+function exportTicPrintPdf() {
+    lastTicData = null;
+    calculateTic();
+    if (!lastTicData) return;
+    renderTicPrintArea(lastTicData);
+    window.print();
+}
+
+function renderTicPrintArea(mix) {
+    const oneXRows = `
+        <tr><td>培养基</td><td>${formatVol(mix.mediumVolMl)}</td></tr>
+        <tr><td>TNF</td><td>${formatVol(mix.tnfVolMl)}</td></tr>
+        <tr><td>IL-1α</td><td>${formatVol(mix.il1VolMl)}</td></tr>
+        <tr><td>C1q</td><td>${formatVol(mix.c1qVolMl)}</td></tr>
+        <tr><td>各组分装需要</td><td>${formatVol(mix.oneXNeededMl)}</td></tr>
+        <tr><td>分装富余</td><td>${formatVol(mix.oneXExtraMl)}</td></tr>
+        <tr><td>合计 1X TIC 工作液</td><td>${formatVol(mix.oneXVolMl)}</td></tr>
+    `;
+    const groupLabelRow = `
+        <tr class="print-label-row">
+            <td>处理组</td>
+            <td>1X TIC 工作液</td>
+            <td>培养基</td>
+            <td>加样</td>
+        </tr>
+    `;
+    const groupRows = mix.groupPlans.map(group => `
+        <tr>
+            <td>${escapeHtml(group.name)}（${formatTicFactor(group.factor)}，${formatMl(group.wells)}孔，配${formatMl(group.calcWells)}孔）</td>
+            <td>${formatVol(group.ticMixMl)}</td>
+            <td>${formatVol(group.dilutionMediumMl)}</td>
+            <td>${formatMl(mix.volPerWell)} mL/孔</td>
+        </tr>
+    `).join('');
+    const tubePlan = buildTubePlan(mix.oneXVolMl);
+
+    document.getElementById('printArea').innerHTML = `
+        <div class="print-sheet">
+            <section class="print-block">
+                <h2>1. 配制 1X TIC 工作液</h2>
+                <table><tbody>${oneXRows}</tbody></table>
+            </section>
+            <section class="print-block">
+                <h2>2. 各组稀释与加样</h2>
+                <table><tbody>${groupLabelRow}${groupRows}</tbody></table>
+            </section>
+            <section class="print-note">
+                ${escapeHtml(tubePlan.summary)}。低浓度组用 1X TIC 工作液与培养基按上表稀释后，每孔加入对应总体积。
+            </section>
+        </div>
+    `;
+}
+
+function getTicExportFilename(suffix, ext) {
+    const now = new Date();
+    const stamp = [
+        now.getFullYear(),
+        String(now.getMonth() + 1).padStart(2, '0'),
+        String(now.getDate()).padStart(2, '0')
+    ].join('');
+    return `tic-${suffix}-${stamp}.${ext}`;
 }
 
 function renderQpcrGroups() {
@@ -1609,17 +1885,6 @@ function renderQpcrPrintArea(data) {
 
     document.getElementById('printArea').innerHTML = `
         <div class="print-sheet">
-            <header class="print-header">
-                <div>
-                    <h1>qPCR 配置打印单</h1>
-                    <p>${escapeHtml(new Date().toLocaleDateString('zh-CN'))}</p>
-                </div>
-                <div class="print-meta">
-                    <div>分组 ${data.cleanGroups.length} 个 | 基因 ${data.cleanGenes.length} 个</div>
-                    <div>总反应孔 ${data.reactionCount}</div>
-                    <div>${data.design.plateCount} 块板 | 平行 ${data.replicates} | 富余 +${data.extraWells}</div>
-                </div>
-            </header>
             <section class="print-block">
                 <h2>1. 逆转录与稀释计算</h2>
                 <table>
@@ -1787,8 +2052,6 @@ function buildQpcrPrintHtml(data) {
 <title>qPCR 打印记录</title>
 <style>
 body { font-family: "PingFang SC", "Microsoft YaHei", Arial, sans-serif; color: #0f172a; margin: 20px; }
-h1, h2 { margin: 0 0 10px; }
-h1 { font-size: 20px; }
 h2 { margin-top: 18px; font-size: 16px; }
 p { margin: 4px 0; }
 table { border-collapse: collapse; width: 100%; margin-top: 8px; font-size: 12px; }
@@ -1800,12 +2063,6 @@ th { background: #f8fafc; }
 </style>
 </head>
 <body>
-<h1>qPCR 实验打印记录</h1>
-<p>日期：${escapeHtml(new Date().toLocaleString('zh-CN'))}</p>
-<p>分组：${escapeHtml(data.cleanGroups.map(g => g.name).join('、'))}</p>
-<p>基因：${escapeHtml(data.cleanGenes.map((g, index) => (index === 0 ? `${g.name}（内参）` : g.name)).join('、'))}</p>
-<p>板数：${escapeHtml(`${data.design.plateCount}`)}；总反应孔：${escapeHtml(`${data.reactionCount}`)}（按实际排板计算）</p>
-
 <h2>1. 逆转录体系配置（20 µL/样品）</h2>
 <table class="rt">
 <thead><tr><th>组分</th>${rtHead}</tr></thead>

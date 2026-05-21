@@ -180,19 +180,19 @@
                     <div class="section-title">母液浓度</div>
                     <div class="volume-grid">
                         <div class="vol-box">
-                            <label class="input-label-small">TNF (ng/mL)</label>
+                            <label class="input-label-small">TNF (ng/mL，200ul分装)</label>
                             <div class="input-with-unit">
                                 <input type="number" id="ticTnfStock" value="2500" step="10" min="0">
                                 <span>ng/mL</span>
                             </div>
-                            <label class="input-label-small">IL-1α (ng/mL)</label>
+                            <label class="input-label-small">IL-1α (ng/mL，50ul分装)</label>
                             <div class="input-with-unit">
                                 <input type="number" id="ticIl1Stock" value="2500" step="10" min="0">
                                 <span>ng/mL</span>
                             </div>
                         </div>
                         <div class="vol-box">
-                            <label class="input-label-small">C1q (mg/mL)</label>
+                            <label class="input-label-small">C1q (mg/mL，10ul分装)</label>
                             <div class="input-with-unit">
                                 <input type="number" id="ticC1qStock" value="1.04" step="0.01" min="0">
                                 <span>mg/mL</span>
@@ -224,11 +224,14 @@
                     </div>
 
                     <div class="section-title">培养体系</div>
+                    <div class="form-group">
+                        <label>培养板规格（加载默认每孔体积）</label>
+                        <select id="ticPlateType" onchange="loadTicPreset()">
+                            <option value="6well">六孔板</option>
+                            <option value="12well">12孔板</option>
+                        </select>
+                    </div>
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
-                        <div class="form-group">
-                            <label>需要孔数</label>
-                            <input type="number" id="ticWells" value="6" min="1" step="1">
-                        </div>
                         <div class="form-group">
                             <label>每孔体积</label>
                             <div class="input-with-unit">
@@ -236,15 +239,29 @@
                                 <span>mL</span>
                             </div>
                         </div>
+                        <div class="form-group">
+                            <label>每组富余孔数</label>
+                            <input type="number" id="ticExtraWells" value="1" min="0" step="1">
+                        </div>
                     </div>
                     <div class="form-group">
-                        <label>富余孔数</label>
-                        <input type="number" id="ticExtraWells" value="1" min="0" step="1">
+                        <label>1X TIC 工作液分装富余（+N孔）</label>
+                        <input type="number" id="ticMixExtraWells" value="0.5" min="0" step="0.1">
                     </div>
+
+                    <div class="section-title">TIC 处理组</div>
+                    <div id="ticGroupsList" class="group-list"></div>
+                    <button class="btn-add" onclick="addTicGroup()"><i class="fas fa-plus"></i> 添加处理组</button>
 
                     <button class="btn-primary" onclick="calculateTic()">
                         <i class="fas fa-calculator"></i> 生成方案
                     </button>
+                    <div class="action-grid">
+                        <button class="btn-secondary" onclick="exportTicConfig()"><i class="fas fa-file-export"></i> 导出配置</button>
+                        <button class="btn-secondary" onclick="triggerImportTicConfig()"><i class="fas fa-file-import"></i> 导入配置</button>
+                        <button class="btn-secondary" onclick="exportTicPrintPdf()"><i class="fas fa-print"></i> 打印/PDF</button>
+                    </div>
+                    <input type="file" id="ticConfigFile" accept="application/json,.json" style="display:none;" onchange="importTicConfig(event)">
                 </section>
 
                 <section class="card" id="ticResultContainer">
@@ -267,7 +284,7 @@
                         <div class="recipe-block">
                             <div class="recipe-header">
                                 <h3>1. TIC 混合液配制</h3>
-                                <span class="tag tag-a">总体系</span>
+                                <span class="tag tag-a">1X 工作液</span>
                             </div>
                             <table class="data-table">
                                 <thead>
@@ -292,14 +309,18 @@
 
                         <div class="recipe-block">
                             <div class="recipe-header">
-                                <h3>3. 每管配制量</h3>
-                                <span class="tag tag-b">同规格分装</span>
+                                <h3>3. 各组稀释与加样</h3>
+                                <span class="tag tag-b">按倍数</span>
                             </div>
                             <table class="data-table">
                                 <thead>
                                     <tr>
-                                        <th>成分</th>
-                                        <th>每管加入量</th>
+                                        <th>处理组</th>
+                                        <th>TIC 倍数</th>
+                                        <th>孔数</th>
+                                        <th>1X TIC</th>
+                                        <th>培养基</th>
+                                        <th>总量</th>
                                     </tr>
                                 </thead>
                                 <tbody id="ticPerTubeBody">
