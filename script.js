@@ -2,15 +2,42 @@
 const PRESETS = {
     '6well': {
         name: '六孔板 (6-well)',
-        optiA: 125, lipo: 7.5, optiB: 125, sirna: 5
+        optiA: 125, lipo: 7.5, optiB: 125, sirna: 5, plasmid: 2.5, p3000: 5
     },
     '12well': {
         name: '12孔板 (12-well)',
-        optiA: 50, lipo: 3, optiB: 50, sirna: 2.5
+        optiA: 50, lipo: 3, optiB: 50, sirna: 2.5, plasmid: 1, p3000: 2
     },
     '60mm': {
         name: '60mm 培养皿',
-        optiA: 250, lipo: 17, optiB: 250, sirna: 10
+        optiA: 250, lipo: 17, optiB: 250, sirna: 10, plasmid: 6, p3000: 12
+    }
+};
+
+const LIPO_MODE_LABELS = {
+    sirna: {
+        experiment: 'siRNA 转染',
+        payload: 'siRNA',
+        payloadLower: 'siRNA',
+        tubeB: 'siRNA 稀释液',
+        componentTitle: 'siRNA 组分',
+        addText: 'siRNA',
+        placeholder: 'siRNA名称',
+        defaultPrefix: 'siRNA',
+        configApp: 'biotools-lipo3000',
+        filePrefix: 'lipo3000'
+    },
+    plasmid: {
+        experiment: '质粒转染',
+        payload: '质粒',
+        payloadLower: '质粒',
+        tubeB: '质粒稀释液',
+        componentTitle: '质粒组分',
+        addText: '质粒',
+        placeholder: '质粒名称',
+        defaultPrefix: 'OE',
+        configApp: 'biotools-lipo3000-plasmid',
+        filePrefix: 'lipo3000-plasmid'
     }
 };
 
@@ -68,29 +95,99 @@ function bindTabs() {
 }
 
 function loadPreset() {
+    const mode = getLipoMode();
     const type = document.getElementById('plateType').value;
     const previousOptiB = parseFloat(document.getElementById('volOptiB').value);
-    const previousSirna = parseFloat(document.getElementById('volSiRNA').value);
+    const previousPayload = parseFloat(document.getElementById('volSiRNA').value);
+    const previousP3000 = parseFloat(document.getElementById('volP3000').value);
     const p = PRESETS[type];
+    const payloadDefault = getLipoPayloadDefault(p, mode);
+    const p3000Default = mode === 'plasmid' ? p.p3000 : 0;
+    updateLipoModeLabels(mode);
     document.getElementById('volOptiA').value = p.optiA;
     document.getElementById('volLipo').value = p.lipo;
     document.getElementById('volOptiB').value = p.optiB;
-    document.getElementById('volSiRNA').value = p.sirna;
+    document.getElementById('volSiRNA').value = payloadDefault;
+    document.getElementById('volP3000').value = p3000Default;
     groups.forEach(group => {
         ensureGroupBConfig(group);
         if (!Number.isFinite(previousOptiB) || group.optiB === previousOptiB) {
             group.optiB = p.optiB;
         }
         group.sirnas.forEach(sirna => {
-            if (!Number.isFinite(previousSirna) || sirna.volume === previousSirna) {
-                sirna.volume = p.sirna;
+            if (!Number.isFinite(previousPayload) || sirna.volume === previousPayload) {
+                sirna.volume = payloadDefault;
             }
         });
+        if (!Number.isFinite(previousP3000) || group.p3000 === previousP3000) {
+            group.p3000 = p3000Default;
+        }
     });
     renderGroups();
 }
 
+function switchLipoMode() {
+    const mode = getLipoMode();
+    groups = createDefaultLipoGroups(mode);
+    loadPreset();
+    clearLipoResult();
+}
+
+function getLipoMode() {
+    const modeEl = document.getElementById('transfectionMode');
+    return modeEl && modeEl.value === 'plasmid' ? 'plasmid' : 'sirna';
+}
+
+function getLipoLabels(mode = getLipoMode()) {
+    return LIPO_MODE_LABELS[mode] || LIPO_MODE_LABELS.sirna;
+}
+
+function getLipoPayloadDefault(preset, mode = getLipoMode()) {
+    return mode === 'plasmid' ? preset.plasmid : preset.sirna;
+}
+
+function updateLipoModeLabels(mode = getLipoMode()) {
+    const labels = getLipoLabels(mode);
+    const tubeBTitle = document.getElementById('tubeBTitle');
+    const payloadDefaultLabel = document.getElementById('payloadDefaultLabel');
+    const p3000Block = document.getElementById('p3000DefaultBlock');
+    if (tubeBTitle) tubeBTitle.textContent = labels.tubeB;
+    if (payloadDefaultLabel) payloadDefaultLabel.textContent = labels.payload;
+    if (p3000Block) p3000Block.style.display = mode === 'plasmid' ? 'block' : 'none';
+}
+
+function createDefaultLipoGroups(mode = getLipoMode()) {
+    const plateType = document.getElementById('plateType') ? document.getElementById('plateType').value : '6well';
+    const preset = PRESETS[plateType] || PRESETS['6well'];
+    const payloadDefault = getLipoPayloadDefault(preset, mode);
+    const p3000Default = mode === 'plasmid' ? preset.p3000 : 0;
+    const definitions = mode === 'plasmid'
+        ? [{ name: 'OE-NC', wells: 1 }, { name: 'OE-1', wells: 3 }]
+        : [{ name: 'siNC', wells: 1 }, { name: 'siRNA-1', wells: 3 }];
+    const idBase = Date.now();
+    return definitions.map((item, index) => ({
+        id: idBase + index,
+        name: item.name,
+        wells: item.wells,
+        optiB: preset.optiB,
+        p3000: p3000Default,
+        sirnas: [{ id: idBase + index * 10 + 1, name: item.name, volume: payloadDefault }]
+    }));
+}
+
+function clearLipoResult() {
+    lastLipoPlan = null;
+    const placeholder = document.getElementById('resultPlaceholder');
+    const content = document.getElementById('resultContent');
+    if (placeholder) placeholder.style.display = 'block';
+    if (content) content.style.display = 'none';
+    const printArea = document.getElementById('printArea');
+    if (printArea) printArea.innerHTML = '';
+}
+
 function renderGroups() {
+    const mode = getLipoMode();
+    const labels = getLipoLabels(mode);
     const list = document.getElementById('groupsList');
     list.innerHTML = '';
     
@@ -100,14 +197,21 @@ function renderGroups() {
         div.className = 'group-item';
         const sirnaRows = group.sirnas.map((sirna, sirnaIndex) => `
             <div class="sirna-row">
-                <input type="text" placeholder="siRNA名称" value="${escapeHtml(sirna.name)}" onchange="updateGroupSirna(${index}, ${sirnaIndex}, 'name', this.value)">
+                <input type="text" placeholder="${labels.placeholder}" value="${escapeHtml(sirna.name)}" onchange="updateGroupSirna(${index}, ${sirnaIndex}, 'name', this.value)">
                 <div class="input-with-unit" style="margin-bottom:0;">
                     <input type="number" placeholder="单孔量" value="${sirna.volume}" min="0" step="0.1" onchange="updateGroupSirna(${index}, ${sirnaIndex}, 'volume', this.value)">
                     <span style="font-size:0.75rem;">µL/孔</span>
                 </div>
-                <button class="btn-icon" onclick="removeGroupSirna(${index}, ${sirnaIndex})" title="删除siRNA"><i class="fas fa-minus"></i></button>
+                <button class="btn-icon" onclick="removeGroupSirna(${index}, ${sirnaIndex})" title="删除${labels.payload}"><i class="fas fa-minus"></i></button>
             </div>
         `).join('');
+        const p3000Row = mode === 'plasmid' ? `
+            <label class="input-label-small">P3000 单孔量</label>
+            <div class="input-with-unit">
+                <input type="number" value="${group.p3000}" min="0" step="0.1" onchange="updateGroup(${index}, 'p3000', this.value)">
+                <span>µL/孔</span>
+            </div>
+        ` : '';
         div.innerHTML = `
             <div class="group-main-row">
                 <input type="text" placeholder="分组名称" value="${escapeHtml(group.name)}" onchange="updateGroup(${index}, 'name', this.value)">
@@ -115,19 +219,23 @@ function renderGroups() {
                     <input type="number" placeholder="孔数" value="${group.wells}" min="0" step="1" onchange="updateGroup(${index}, 'wells', this.value)">
                     <span style="font-size:0.75rem;">孔</span>
                 </div>
-                <button class="btn-icon" onclick="removeGroup(${index})" title="删除分组"><i class="fas fa-trash-alt"></i></button>
+                <div class="group-actions">
+                    <button class="btn-icon" onclick="duplicateGroup(${index})" title="复制分组"><i class="far fa-copy"></i></button>
+                    <button class="btn-icon" onclick="removeGroup(${index})" title="删除分组"><i class="fas fa-trash-alt"></i></button>
+                </div>
             </div>
             <div class="group-b-config">
                 <div class="group-b-title">
                     <span><span class="tag tag-b">B 管</span> ${escapeHtml(group.name || `分组${index + 1}`)}</span>
-                    <button class="btn-inline" onclick="addGroupSirna(${index})"><i class="fas fa-plus"></i> siRNA</button>
+                    <button class="btn-inline" onclick="addGroupSirna(${index})"><i class="fas fa-plus"></i> ${labels.addText}</button>
                 </div>
                 <label class="input-label-small">B 管 Opti-MEM 单孔量</label>
                 <div class="input-with-unit">
                     <input type="number" value="${group.optiB}" min="0" step="1" onchange="updateGroup(${index}, 'optiB', this.value)">
                     <span>µL/孔</span>
                 </div>
-                <label class="input-label-small">siRNA 组分</label>
+                ${p3000Row}
+                <label class="input-label-small">${labels.componentTitle}</label>
                 <div class="sirna-list">${sirnaRows}</div>
             </div>
         `;
@@ -137,37 +245,117 @@ function renderGroups() {
 
 function addGroup() {
     const nextIndex = getNextSiRnaIndex();
-    groups.push(createGroup(`siRNA-${nextIndex}`, 1));
+    const labels = getLipoLabels();
+    const name = getLipoMode() === 'plasmid' && nextIndex === 0 ? 'OE-NC' : `${labels.defaultPrefix}-${nextIndex}`;
+    groups.push(createGroup(name, 1));
     renderGroups();
 }
 
+function duplicateGroup(index) {
+    const source = groups[index];
+    if (!source) return;
+    ensureGroupBConfig(source);
+    const nextName = getDuplicatedGroupName(source.name);
+    const idBase = Date.now();
+    const duplicatedSirnas = source.sirnas.map((item, itemIndex) => ({
+        id: idBase + itemIndex + 1,
+        name: item.name === source.name ? nextName : item.name,
+        volume: parseFloat(item.volume) || 0
+    }));
+    groups.splice(index + 1, 0, {
+        id: idBase,
+        name: nextName,
+        wells: parseFloat(source.wells) || 0,
+        optiB: parseFloat(source.optiB) || 0,
+        p3000: parseFloat(source.p3000) || 0,
+        sirnas: duplicatedSirnas.length ? duplicatedSirnas : [{ id: idBase + 1, name: nextName, volume: parseFloat(document.getElementById('volSiRNA').value) || 0 }]
+    });
+    clearLipoResult();
+    renderGroups();
+}
+
+function getDuplicatedGroupName(name) {
+    const currentName = String(name || getLipoLabels().defaultPrefix);
+    const existingNames = new Set(groups.map(group => String(group.name)));
+    const numericMatch = currentName.match(/^(.*?)(\d+)$/);
+    if (numericMatch) {
+        const prefix = numericMatch[1];
+        let maxNumber = 0;
+        const prefixPattern = new RegExp(`^${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\d+)$`);
+        existingNames.forEach(item => {
+            const match = item.match(prefixPattern);
+            if (match) {
+                const num = parseInt(match[1], 10);
+                if (!Number.isNaN(num)) maxNumber = Math.max(maxNumber, num);
+            }
+        });
+        let candidate = `${prefix}${maxNumber + 1}`;
+        while (existingNames.has(candidate)) {
+            maxNumber += 1;
+            candidate = `${prefix}${maxNumber + 1}`;
+        }
+        return candidate;
+    }
+    let copyIndex = 1;
+    let candidate = `${currentName}-副本`;
+    while (existingNames.has(candidate)) {
+        copyIndex += 1;
+        candidate = `${currentName}-副本${copyIndex}`;
+    }
+    return candidate;
+}
+
 function createGroup(name, wells) {
+    const mode = getLipoMode();
     const defaultOptiB = parseFloat(document.getElementById('volOptiB').value) || PRESETS['6well'].optiB;
-    const defaultSirna = parseFloat(document.getElementById('volSiRNA').value) || PRESETS['6well'].sirna;
+    const defaultSirna = parseFloat(document.getElementById('volSiRNA').value) || getLipoPayloadDefault(PRESETS['6well'], mode);
+    const defaultP3000 = mode === 'plasmid' ? (parseFloat(document.getElementById('volP3000').value) || PRESETS['6well'].p3000) : 0;
     const id = Date.now();
     return {
         id,
         name,
         wells,
         optiB: defaultOptiB,
+        p3000: defaultP3000,
         sirnas: [{ id: id + 1, name, volume: defaultSirna }]
     };
 }
 
 function ensureGroupBConfig(group) {
+    const mode = getLipoMode();
     if (typeof group.optiB !== 'number') {
         group.optiB = parseFloat(document.getElementById('volOptiB').value) || PRESETS['6well'].optiB;
     }
+    if (typeof group.p3000 !== 'number') {
+        group.p3000 = mode === 'plasmid' ? (parseFloat(document.getElementById('volP3000').value) || PRESETS['6well'].p3000) : 0;
+    }
     if (!Array.isArray(group.sirnas) || group.sirnas.length === 0) {
-        const defaultSirna = parseFloat(document.getElementById('volSiRNA').value) || PRESETS['6well'].sirna;
-        group.sirnas = [{ id: Date.now(), name: group.name || 'siRNA', volume: defaultSirna }];
+        const labels = getLipoLabels(mode);
+        const defaultSirna = parseFloat(document.getElementById('volSiRNA').value) || getLipoPayloadDefault(PRESETS['6well'], mode);
+        group.sirnas = [{ id: Date.now(), name: group.name || labels.payload, volume: defaultSirna }];
     }
 }
 
 function getNextSiRnaIndex() {
+    if (getLipoMode() === 'plasmid') {
+        let maxIndex = 0;
+        let hasNc = false;
+        groups.forEach(group => {
+            if (String(group.name).toUpperCase() === 'OE-NC') hasNc = true;
+            const match = String(group.name).match(/^OE[- ]?(\d+)$/i);
+            if (match) {
+                const num = parseInt(match[1], 10);
+                if (!Number.isNaN(num)) maxIndex = Math.max(maxIndex, num);
+            }
+        });
+        return hasNc ? maxIndex + 1 : 0;
+    }
+    const labels = getLipoLabels();
+    const escapedPrefix = labels.defaultPrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const specificPattern = new RegExp(`${escapedPrefix}[- ]?(\\d+)`, 'i');
     let maxIndex = 0;
     groups.forEach(group => {
-        const match = String(group.name).match(/sirna[- ]?(\\d+)/i);
+        const match = String(group.name).match(specificPattern);
         if (match) {
             const num = parseInt(match[1], 10);
             if (!Number.isNaN(num)) maxIndex = Math.max(maxIndex, num);
@@ -186,7 +374,7 @@ function removeGroup(index) {
 }
 
 function updateGroup(index, field, value) {
-    if (field === 'wells' || field === 'optiB') {
+    if (field === 'wells' || field === 'optiB' || field === 'p3000') {
         value = parseFloat(value);
         if (value < 0) value = 0;
     }
@@ -197,10 +385,11 @@ function addGroupSirna(groupIndex) {
     const group = groups[groupIndex];
     ensureGroupBConfig(group);
     const nextNumber = group.sirnas.length + 1;
-    const defaultSirna = parseFloat(document.getElementById('volSiRNA').value) || PRESETS['6well'].sirna;
+    const labels = getLipoLabels();
+    const defaultSirna = parseFloat(document.getElementById('volSiRNA').value) || getLipoPayloadDefault(PRESETS['6well']);
     group.sirnas.push({
         id: Date.now(),
-        name: `siRNA-${nextNumber}`,
+        name: `${labels.defaultPrefix}-${nextNumber}`,
         volume: defaultSirna
     });
     renderGroups();
@@ -220,7 +409,7 @@ function removeGroupSirna(groupIndex, sirnaIndex) {
     const group = groups[groupIndex];
     ensureGroupBConfig(group);
     if (group.sirnas.length <= 1) {
-        alert('每个 B 管至少保留一个 siRNA 组分。');
+        alert(`每个 B 管至少保留一个${getLipoLabels().payload}组分。`);
         return;
     }
     group.sirnas.splice(sirnaIndex, 1);
@@ -229,12 +418,17 @@ function removeGroupSirna(groupIndex, sirnaIndex) {
 
 function calculate() {
     // 1. Get Settings
+    const mode = getLipoMode();
+    const labels = getLipoLabels(mode);
     const settings = {
+        mode,
+        labels,
         name: document.getElementById('plateType').options[document.getElementById('plateType').selectedIndex].text,
         optiA: parseFloat(document.getElementById('volOptiA').value) || 0,
         lipo: parseFloat(document.getElementById('volLipo').value) || 0,
         optiB: parseFloat(document.getElementById('volOptiB').value) || 0,
-        sirna: parseFloat(document.getElementById('volSiRNA').value) || 0
+        sirna: parseFloat(document.getElementById('volSiRNA').value) || 0,
+        p3000: mode === 'plasmid' ? (parseFloat(document.getElementById('volP3000').value) || 0) : 0
     };
 
     const groupExtra = parseFloat(document.getElementById('groupExtraWells').value) || 0;
@@ -252,12 +446,15 @@ function calculate() {
             total: calcWells * (parseFloat(sirna.volume) || 0)
         }));
         const totalSirnaPerWell = sirnas.reduce((sum, sirna) => sum + sirna.volume, 0);
+        const p3000PerWell = settings.mode === 'plasmid' ? (parseFloat(group.p3000) || 0) : 0;
         
         return {
             ...group,
             calcWells: calcWells,
             optiBPerWell: parseFloat(group.optiB) || 0,
             optiB: calcWells * (parseFloat(group.optiB) || 0),
+            p3000PerWell,
+            p3000: calcWells * p3000PerWell,
             sirnas,
             totalSirnaPerWell,
             totalSirna: calcWells * totalSirnaPerWell
@@ -311,6 +508,12 @@ function renderResults(settings, tubeA, groupResults, groupExtra, tubeAExtra) {
     let tubeBHtml = '';
     groupResults.forEach(group => {
         const volFromA = group.calcWells * (settings.optiA + settings.lipo);
+        const p3000Row = settings.mode === 'plasmid' ? `
+                    <tr>
+                        <td>P3000 <span style="color:var(--text-muted);">(${formatNum(group.p3000PerWell)} µL/孔)</span></td>
+                        <td class="val-highlight">${formatNum(group.p3000)} µL</td>
+                    </tr>
+        ` : '';
         tubeBHtml += `
             <div class="group-card">
                 <div class="group-card-header">
@@ -322,9 +525,10 @@ function renderResults(settings, tubeA, groupResults, groupExtra, tubeAExtra) {
                         <td width="50%">Opti-MEM</td>
                         <td class="val-highlight">${formatNum(group.optiB)} µL</td>
                     </tr>
+                    ${p3000Row}
                     ${group.sirnas.map(sirna => `
                         <tr>
-                            <td>${escapeHtml(sirna.name || 'siRNA')} <span style="color:var(--text-muted);">(${formatNum(sirna.volume)} µL/孔)</span></td>
+                            <td>${escapeHtml(sirna.name || settings.labels.payload)} <span style="color:var(--text-muted);">(${formatNum(sirna.volume)} µL/孔)</span></td>
                             <td class="val-highlight">${formatNum(sirna.total)} µL</td>
                         </tr>
                     `).join('')}
@@ -334,7 +538,7 @@ function renderResults(settings, tubeA, groupResults, groupExtra, tubeAExtra) {
                     </tr>
                     <tr style="background-color: #f8fafc; font-weight:600;">
                         <td>每孔转染复合物</td>
-                        <td>${formatNum((settings.optiA + settings.lipo) + group.optiBPerWell + group.totalSirnaPerWell)} µL</td>
+                        <td>${formatNum((settings.optiA + settings.lipo) + group.optiBPerWell + group.p3000PerWell + group.totalSirnaPerWell)} µL</td>
                     </tr>
                 </table>
             </div>
@@ -348,7 +552,7 @@ function renderResults(settings, tubeA, groupResults, groupExtra, tubeAExtra) {
 
 function generateProtocolText(settings, tubeA, groupResults) {
     const date = new Date().toLocaleDateString('zh-CN');
-    let text = `实验：siRNA 转染 | ${date}\n`;
+    let text = `实验：${settings.labels.experiment} | ${date}\n`;
     text += `体系：${settings.name}\n\n`;
     text += `[1. A 管混合液]\n`;
     text += `  - Opti-MEM：     ${formatNum(tubeA.optiA)} µL\n`;
@@ -359,12 +563,15 @@ function generateProtocolText(settings, tubeA, groupResults) {
     groupResults.forEach(g => {
         text += `  > 分组：${g.name}\n`;
         text += `    - Opti-MEM：  ${formatNum(g.optiB)} µL\n`;
+        if (settings.mode === 'plasmid') {
+            text += `    - P3000：     ${formatNum(g.p3000)} µL（${formatNum(g.p3000PerWell)} µL/孔）\n`;
+        }
         g.sirnas.forEach(sirna => {
-            text += `    - ${sirna.name || 'siRNA'}： ${formatNum(sirna.total)} µL（${formatNum(sirna.volume)} µL/孔）\n`;
+            text += `    - ${sirna.name || settings.labels.payload}： ${formatNum(sirna.total)} µL（${formatNum(sirna.volume)} µL/孔）\n`;
         });
         const volFromA = g.calcWells * (settings.optiA + settings.lipo);
         text += `    - 加入 A 管： ${formatNum(volFromA)} µL\n`;
-        text += `    - 每孔转染复合物：${formatNum((settings.optiA + settings.lipo) + g.optiBPerWell + g.totalSirnaPerWell)} µL\n`;
+        text += `    - 每孔转染复合物：${formatNum((settings.optiA + settings.lipo) + g.optiBPerWell + g.p3000PerWell + g.totalSirnaPerWell)} µL\n`;
         text += `    - 轻轻混匀，室温静置 10-15 分钟\n\n`;
     });
     
@@ -405,17 +612,22 @@ function collectLipoConfig() {
         document.activeElement.blur();
     }
     groups.forEach(ensureGroupBConfig);
+    const mode = getLipoMode();
+    const labels = getLipoLabels(mode);
     return {
-        app: 'biotools-lipo3000',
+        app: labels.configApp,
         version: 1,
         exportedAt: new Date().toISOString(),
         module: 'lipo3000',
+        transfectionMode: mode,
         plateType: document.getElementById('plateType').value,
         defaults: {
             optiA: parseFloat(document.getElementById('volOptiA').value) || 0,
             lipo: parseFloat(document.getElementById('volLipo').value) || 0,
             optiB: parseFloat(document.getElementById('volOptiB').value) || 0,
-            sirna: parseFloat(document.getElementById('volSiRNA').value) || 0
+            sirna: parseFloat(document.getElementById('volSiRNA').value) || 0,
+            payload: parseFloat(document.getElementById('volSiRNA').value) || 0,
+            p3000: mode === 'plasmid' ? (parseFloat(document.getElementById('volP3000').value) || 0) : 0
         },
         extra: {
             groupExtraWells: parseFloat(document.getElementById('groupExtraWells').value) || 0,
@@ -426,6 +638,7 @@ function collectLipoConfig() {
             name: group.name,
             wells: parseFloat(group.wells) || 0,
             optiB: parseFloat(group.optiB) || 0,
+            p3000: mode === 'plasmid' ? (parseFloat(group.p3000) || 0) : 0,
             sirnas: group.sirnas.map(sirna => ({
                 id: sirna.id,
                 name: sirna.name,
@@ -442,7 +655,7 @@ function exportLipoConfig() {
     const a = document.createElement('a');
     const date = new Date().toISOString().slice(0, 10);
     a.href = url;
-    a.download = `lipo3000-config-${date}.json`;
+    a.download = `${getLipoLabels(config.transfectionMode).filePrefix}-config-${date}.json`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -475,35 +688,42 @@ function applyLipoConfig(config) {
     if (!config || config.module !== 'lipo3000' || !config.defaults || !Array.isArray(config.groups)) {
         throw new Error('Invalid lipo config');
     }
+    const mode = config.transfectionMode === 'plasmid' ? 'plasmid' : 'sirna';
+    document.getElementById('transfectionMode').value = mode;
     const plateType = PRESETS[config.plateType] ? config.plateType : '6well';
     document.getElementById('plateType').value = plateType;
+    updateLipoModeLabels(mode);
+    const payloadFallback = getLipoPayloadDefault(PRESETS[plateType], mode);
     document.getElementById('volOptiA').value = parseNumber(config.defaults.optiA, PRESETS[plateType].optiA);
     document.getElementById('volLipo').value = parseNumber(config.defaults.lipo, PRESETS[plateType].lipo);
     document.getElementById('volOptiB').value = parseNumber(config.defaults.optiB, PRESETS[plateType].optiB);
-    document.getElementById('volSiRNA').value = parseNumber(config.defaults.sirna, PRESETS[plateType].sirna);
+    document.getElementById('volSiRNA').value = parseNumber(config.defaults.payload ?? config.defaults.sirna, payloadFallback);
+    document.getElementById('volP3000').value = mode === 'plasmid' ? parseNumber(config.defaults.p3000, PRESETS[plateType].p3000) : 0;
     document.getElementById('groupExtraWells').value = parseNumber(config.extra && config.extra.groupExtraWells, 0.4);
     document.getElementById('extraWells').value = parseNumber(config.extra && config.extra.tubeAExtraWells, 0.8);
 
     groups = config.groups.map((group, index) => {
         const name = String(group.name || `Group-${index + 1}`);
+        const labels = getLipoLabels(mode);
         const id = Number.isFinite(parseFloat(group.id)) ? parseFloat(group.id) : Date.now() + index;
         const sirnas = Array.isArray(group.sirnas) && group.sirnas.length > 0
             ? group.sirnas.map((sirna, sirnaIndex) => ({
                 id: Number.isFinite(parseFloat(sirna.id)) ? parseFloat(sirna.id) : Date.now() + index * 100 + sirnaIndex,
-                name: String(sirna.name || `siRNA-${sirnaIndex + 1}`),
-                volume: parseNumber(sirna.volume, parseNumber(config.defaults.sirna, PRESETS[plateType].sirna))
+                name: String(sirna.name || `${labels.defaultPrefix}-${sirnaIndex + 1}`),
+                volume: parseNumber(sirna.volume, parseNumber(config.defaults.payload ?? config.defaults.sirna, payloadFallback))
             }))
-            : [{ id: Date.now() + index, name, volume: parseNumber(config.defaults.sirna, PRESETS[plateType].sirna) }];
+            : [{ id: Date.now() + index, name, volume: parseNumber(config.defaults.payload ?? config.defaults.sirna, payloadFallback) }];
         return {
             id,
             name,
             wells: parseNumber(group.wells, 1),
             optiB: parseNumber(group.optiB, parseNumber(config.defaults.optiB, PRESETS[plateType].optiB)),
+            p3000: mode === 'plasmid' ? parseNumber(group.p3000, parseNumber(config.defaults.p3000, PRESETS[plateType].p3000)) : 0,
             sirnas
         };
     });
     if (groups.length === 0) {
-        groups = [createGroup('siRNA-1', 1)];
+        groups = [createGroup(`${getLipoLabels(mode).defaultPrefix}-1`, 1)];
     }
     renderGroups();
 }
@@ -525,9 +745,12 @@ function renderLipoPrintArea(plan) {
     `;
     const groupCards = plan.groupResults.map(group => {
         const volFromA = group.calcWells * (plan.settings.optiA + plan.settings.lipo);
-        const finalPerWell = (plan.settings.optiA + plan.settings.lipo) + group.optiBPerWell + group.totalSirnaPerWell;
+        const finalPerWell = (plan.settings.optiA + plan.settings.lipo) + group.optiBPerWell + group.p3000PerWell + group.totalSirnaPerWell;
+        const p3000Line = plan.settings.mode === 'plasmid'
+            ? `<tr><td>P3000</td><td>${formatNum(group.p3000)} µL</td></tr>`
+            : '';
         const sirnaLines = group.sirnas.map(sirna => `
-            <tr><td>${escapeHtml(sirna.name || 'siRNA')}</td><td>${formatNum(sirna.total)} µL</td></tr>
+            <tr><td>${escapeHtml(sirna.name || plan.settings.labels.payload)}</td><td>${formatNum(sirna.total)} µL</td></tr>
         `).join('');
         return `
             <section class="print-group">
@@ -535,6 +758,7 @@ function renderLipoPrintArea(plan) {
                 <table>
                     <tbody>
                         <tr><td>Opti-MEM</td><td>${formatNum(group.optiB)} µL</td></tr>
+                        ${p3000Line}
                         ${sirnaLines}
                         <tr><td>加入 A 管混合液</td><td>${formatNum(volFromA)} µL</td></tr>
                         <tr><td>每孔加入转染复合物</td><td>${formatNum(finalPerWell)} µL</td></tr>
