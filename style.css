@@ -698,9 +698,10 @@ select:focus, input:focus {
 }
 
 .plate-cell-print.filled {
-    color: #111827;
+    color: var(--gene-text, #111827);
     font-weight: 700;
-    background: #eff6ff;
+    background: var(--gene-bg, #eff6ff);
+    border-color: var(--gene-border, #bfdbfe);
 }
 
 .plate-cell-print strong {
@@ -861,7 +862,8 @@ select:focus, input:focus {
 }
 
 .plate-cell.filled {
-    background: #eff6ff;
+    background: var(--gene-bg, #eff6ff);
+    border-color: var(--gene-border, #bfdbfe);
 }
 
 .well-dot {
@@ -871,7 +873,7 @@ select:focus, input:focus {
 }
 
 .plate-gene {
-    color: #1d4ed8;
+    color: var(--gene-text, #1d4ed8);
     font-size: 0.68rem;
     font-weight: 700;
     line-height: 1.1;
@@ -891,6 +893,31 @@ select:focus, input:focus {
     text-overflow: ellipsis;
     white-space: nowrap;
     margin: 2px auto 0;
+}
+
+.plate-gene-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 12px;
+    margin: 7px 0;
+}
+
+.plate-gene-key {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    color: var(--gene-text);
+    font-size: 0.72rem;
+    font-weight: 700;
+}
+
+.plate-gene-key i {
+    width: 11px;
+    height: 11px;
+    border: 1px solid var(--gene-border);
+    background: var(--gene-bg);
+    border-radius: 2px;
+    flex: 0 0 auto;
 }
 
 .axis-main {

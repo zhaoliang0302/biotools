@@ -61,6 +61,19 @@ let qpcrGenes = [
     { id: 2, name: 'GeneX' }
 ];
 
+const QPCR_GENE_COLORS = [
+    { background: '#e0f2fe', text: '#075985', border: '#7dd3fc' },
+    { background: '#fef3c7', text: '#92400e', border: '#fcd34d' },
+    { background: '#dcfce7', text: '#166534', border: '#86efac' },
+    { background: '#f3e8ff', text: '#6b21a8', border: '#d8b4fe' },
+    { background: '#fee2e2', text: '#991b1b', border: '#fca5a5' },
+    { background: '#cffafe', text: '#155e75', border: '#67e8f9' },
+    { background: '#ffedd5', text: '#9a3412', border: '#fdba74' },
+    { background: '#fce7f3', text: '#9d174d', border: '#f9a8d4' },
+    { background: '#ecfccb', text: '#3f6212', border: '#bef264' },
+    { background: '#e0e7ff', text: '#3730a3', border: '#a5b4fc' }
+];
+
 let lastQpcrData = null;
 let lastLipoPlan = null;
 let lastTicData = null;
@@ -1408,9 +1421,46 @@ function buildQpcrPlateDesign(groupsList, genesList, replicates) {
         if (groupsList.length * replicates <= rows.length && geneCount <= cols) return 'group-rep-rows';
         return null;
     };
+    const getMixedLayoutPlan = geneCount => {
+        const groupCount = groupsList.length;
+        const standardPerShelf = Math.floor(cols / replicates);
+        const rotatedPerShelf = Math.floor(cols / groupCount);
+        if (standardPerShelf < 1 || rotatedPerShelf < 1 || groupCount > rows.length || replicates > rows.length) {
+            return null;
+        }
+
+        let bestPlan = null;
+        for (let standardCount = geneCount; standardCount >= 0; standardCount -= 1) {
+            const rotatedCount = geneCount - standardCount;
+            const standardShelves = standardCount > 0 ? Math.ceil(standardCount / standardPerShelf) : 0;
+            const rotatedShelves = rotatedCount > 0 ? Math.ceil(rotatedCount / rotatedPerShelf) : 0;
+            const usedRows = standardShelves * groupCount + rotatedShelves * replicates;
+            if (usedRows > rows.length) continue;
+
+            const candidate = {
+                standardCount,
+                rotatedCount,
+                standardPerShelf,
+                rotatedPerShelf,
+                standardShelves,
+                rotatedShelves,
+                usedRows
+            };
+            if (!bestPlan || candidate.usedRows < bestPlan.usedRows ||
+                (candidate.usedRows === bestPlan.usedRows && candidate.standardCount > bestPlan.standardCount)) {
+                bestPlan = candidate;
+            }
+        }
+        return bestPlan;
+    };
+    const getLayoutPlanForGeneCount = geneCount => ({
+        mode: getLayoutModeForGeneCount(geneCount),
+        mixed: getMixedLayoutPlan(geneCount)
+    });
     let maxGenesPerPlate = 0;
-    for (let geneCount = 1; geneCount <= genesList.length; geneCount += 1) {
-        if (geneCount <= maxGenesPerPlateByCapacity && getLayoutModeForGeneCount(geneCount)) {
+    for (let geneCount = 1; geneCount <= Math.min(genesList.length, maxGenesPerPlateByCapacity); geneCount += 1) {
+        const layoutPlan = getLayoutPlanForGeneCount(geneCount);
+        if (layoutPlan.mode || layoutPlan.mixed) {
             maxGenesPerPlate = geneCount;
         }
     }
@@ -1426,7 +1476,8 @@ function buildQpcrPlateDesign(groupsList, genesList, replicates) {
     let plateGeneSets = [genesList];
     let duplicatedReference = false;
 
-    if (onePlateWells > 96 || !getLayoutModeForGeneCount(genesList.length)) {
+    const completeLayoutPlan = getLayoutPlanForGeneCount(genesList.length);
+    if (onePlateWells > 96 || (!completeLayoutPlan.mode && !completeLayoutPlan.mixed)) {
         const maxTargetsPerPlate = maxGenesPerPlate - 1;
         if (maxTargetsPerPlate < 1) {
             return {
@@ -1444,15 +1495,17 @@ function buildQpcrPlateDesign(groupsList, genesList, replicates) {
         const plate = Array.from({ length: 8 }, () => Array.from({ length: cols }, () => null));
         const assignments = [];
         const layoutMode = getLayoutModeForGeneCount(plateGenes.length);
-        if (!layoutMode) {
+        const mixedLayout = getMixedLayoutPlan(plateGenes.length);
+        if (!layoutMode && !mixedLayout) {
             return {
                 error: `板 ${plateNumber} 无法形成整齐矩阵排布。请减少该板基因数、分组数或平行孔数。`
             };
         }
         const columnPlan = [];
-        plateGenes.forEach(gene => {
+        plateGenes.forEach((gene, plateGeneIndex) => {
+            const geneIndex = genesList.indexOf(gene);
             for (let rep = 1; rep <= replicates; rep += 1) {
-                columnPlan.push({ gene: gene.name, rep });
+                columnPlan.push({ gene: gene.name, geneIndex: geneIndex >= 0 ? geneIndex : plateGeneIndex, rep });
             }
         });
 
@@ -1464,6 +1517,7 @@ function buildQpcrPlateDesign(groupsList, genesList, replicates) {
                         plate: plateNumber,
                         group: group.name,
                         gene: colMeta.gene,
+                        geneIndex: colMeta.geneIndex,
                         rep: colMeta.rep,
                         well
                     };
@@ -1487,7 +1541,8 @@ function buildQpcrPlateDesign(groupsList, genesList, replicates) {
                 useReadableLayout: true,
                 layoutMode: 'group-rows',
                 plateNumber,
-                genes: plateGenes.map(g => g.name)
+                genes: plateGenes.map(g => g.name),
+                geneIndices: plateGenes.map(g => genesList.indexOf(g))
             };
         }
 
@@ -1505,6 +1560,7 @@ function buildQpcrPlateDesign(groupsList, genesList, replicates) {
                         plate: plateNumber,
                         group: sampleCol.group,
                         gene: gene.name,
+                        geneIndex: genesList.indexOf(gene),
                         rep: sampleCol.rep,
                         well
                     };
@@ -1528,7 +1584,8 @@ function buildQpcrPlateDesign(groupsList, genesList, replicates) {
                 useReadableLayout: true,
                 layoutMode: 'gene-rows',
                 plateNumber,
-                genes: plateGenes.map(g => g.name)
+                genes: plateGenes.map(g => g.name),
+                geneIndices: plateGenes.map(g => genesList.indexOf(g))
             };
         }
 
@@ -1536,7 +1593,7 @@ function buildQpcrPlateDesign(groupsList, genesList, replicates) {
             const geneRepRows = [];
             plateGenes.forEach(gene => {
                 for (let rep = 1; rep <= replicates; rep += 1) {
-                    geneRepRows.push({ gene: gene.name, rep });
+                    geneRepRows.push({ gene: gene.name, geneIndex: genesList.indexOf(gene), rep });
                 }
             });
             geneRepRows.forEach((rowMeta, rowIndex) => {
@@ -1546,6 +1603,7 @@ function buildQpcrPlateDesign(groupsList, genesList, replicates) {
                         plate: plateNumber,
                         group: group.name,
                         gene: rowMeta.gene,
+                        geneIndex: rowMeta.geneIndex,
                         rep: rowMeta.rep,
                         well
                     };
@@ -1567,7 +1625,61 @@ function buildQpcrPlateDesign(groupsList, genesList, replicates) {
                 useReadableLayout: true,
                 layoutMode: 'gene-rep-rows',
                 plateNumber,
-                genes: plateGenes.map(g => g.name)
+                genes: plateGenes.map(g => g.name),
+                geneIndices: plateGenes.map(g => genesList.indexOf(g))
+            };
+        }
+
+        if (layoutMode === null && mixedLayout) {
+            const placeSample = (rowIndex, colIndex, gene, geneIndex, group, rep) => {
+                const well = `${rows[rowIndex]}${colIndex + 1}`;
+                const sample = {
+                    plate: plateNumber,
+                    group: group.name,
+                    gene: gene.name,
+                    geneIndex,
+                    rep,
+                    well
+                };
+                plate[rowIndex][colIndex] = sample;
+                assignments.push(sample);
+            };
+
+            plateGenes.slice(0, mixedLayout.standardCount).forEach((gene, index) => {
+                const shelf = Math.floor(index / mixedLayout.standardPerShelf);
+                const slot = index % mixedLayout.standardPerShelf;
+                const rowStart = shelf * groupsList.length;
+                const colStart = slot * replicates;
+                groupsList.forEach((group, groupIndex) => {
+                    for (let rep = 1; rep <= replicates; rep += 1) {
+                        placeSample(rowStart + groupIndex, colStart + rep - 1, gene, genesList.indexOf(gene), group, rep);
+                    }
+                });
+            });
+
+            const rotatedRowStart = mixedLayout.standardShelves * groupsList.length;
+            plateGenes.slice(mixedLayout.standardCount).forEach((gene, index) => {
+                const shelf = Math.floor(index / mixedLayout.rotatedPerShelf);
+                const slot = index % mixedLayout.rotatedPerShelf;
+                const rowStart = rotatedRowStart + shelf * replicates;
+                const colStart = slot * groupsList.length;
+                for (let rep = 1; rep <= replicates; rep += 1) {
+                    groupsList.forEach((group, groupIndex) => {
+                        placeSample(rowStart + rep - 1, colStart + groupIndex, gene, genesList.indexOf(gene), group, rep);
+                    });
+                }
+            });
+
+            return {
+                plate,
+                assignments,
+                rowLabels: rows.map(rowName => `${rowName} | 混合排布`),
+                colLabels: Array.from({ length: cols }, (_, colIndex) => `${colIndex + 1} | 混合排布`),
+                useReadableLayout: true,
+                layoutMode: 'mixed',
+                plateNumber,
+                genes: plateGenes.map(g => g.name),
+                geneIndices: plateGenes.map(g => genesList.indexOf(g))
             };
         }
 
@@ -1584,6 +1696,7 @@ function buildQpcrPlateDesign(groupsList, genesList, replicates) {
                     plate: plateNumber,
                     group: rowMeta.group,
                     gene: gene.name,
+                    geneIndex: genesList.indexOf(gene),
                     rep: rowMeta.rep,
                     well
                 };
@@ -1605,7 +1718,8 @@ function buildQpcrPlateDesign(groupsList, genesList, replicates) {
             useReadableLayout: true,
             layoutMode: 'group-rep-rows',
             plateNumber,
-            genes: plateGenes.map(g => g.name)
+            genes: plateGenes.map(g => g.name),
+            geneIndices: plateGenes.map(g => genesList.indexOf(g))
         };
     };
 
@@ -1822,6 +1936,12 @@ function renderQpcrPlate(design) {
     document.getElementById('qpcrPlateContainer').innerHTML = html;
 }
 
+function getQpcrGeneCellStyle(geneIndex) {
+    const safeIndex = Number.isFinite(geneIndex) && geneIndex >= 0 ? geneIndex : 0;
+    const color = QPCR_GENE_COLORS[safeIndex % QPCR_GENE_COLORS.length];
+    return `--gene-bg:${color.background};--gene-text:${color.text};--gene-border:${color.border};`;
+}
+
 function renderSingleQpcrPlate(plateDesign, design) {
     const rowNames = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
     const headCells = Array.from({ length: 12 }, (_, i) => `
@@ -1835,7 +1955,7 @@ function renderSingleQpcrPlate(plateDesign, design) {
         const rowCells = plateDesign.plate[rowIndex].map(cell => {
             if (!cell) return '<td class="plate-cell empty">-</td>';
             return `
-                <td class="plate-cell filled">
+                <td class="plate-cell filled" style="${getQpcrGeneCellStyle(cell.geneIndex)}">
                     <div class="plate-gene">${escapeHtml(cell.gene)}</div>
                     <div class="plate-sample">${escapeHtml(cell.group)} R${cell.rep}</div>
                 </td>
@@ -1853,7 +1973,9 @@ function renderSingleQpcrPlate(plateDesign, design) {
     }).join('');
 
     const plateGenes = plateDesign.genes.join('、');
-    const layoutText = plateDesign.layoutMode === 'gene-rows'
+    const layoutText = plateDesign.layoutMode === 'mixed'
+        ? '混合方向紧凑排布，剩余区域自动转置'
+        : plateDesign.layoutMode === 'gene-rows'
         ? '行对应基因，列对应样本/平行孔'
         : plateDesign.layoutMode === 'gene-rep-rows'
             ? '行对应基因/平行孔，列对应样本'
@@ -1861,9 +1983,19 @@ function renderSingleQpcrPlate(plateDesign, design) {
                 ? '行对应样本/平行孔，列对应基因'
                 : '行对应样本，列对应基因/平行孔';
     const layoutHint = `<div class="plate-hint">板 ${plateDesign.plateNumber}/${design.plateCount}：${layoutText}；包含 ${plateGenes}</div>`;
+    const legend = `
+        <div class="plate-gene-legend">
+            ${plateDesign.genes.map((gene, index) => `
+                <span class="plate-gene-key" style="${getQpcrGeneCellStyle((plateDesign.geneIndices || [])[index])}">
+                    <i></i>${escapeHtml(gene)}${(plateDesign.geneIndices || [])[index] === 0 ? '（内参）' : ''}
+                </span>
+            `).join('')}
+        </div>
+    `;
 
     return `
         ${layoutHint}
+        ${legend}
         <div class="plate-wrap">
             <table class="plate-table">
                 <thead><tr><th></th>${headCells}</tr></thead>
@@ -2091,7 +2223,7 @@ function renderQpcrPrintArea(data) {
                 <tr>
                     <th>${String.fromCharCode(65 + rowIndex)}<br><span>${escapeHtml(mapped)}</span></th>
                     ${row.map(cell => `
-                        <td class="${cell ? 'plate-cell-print filled' : 'plate-cell-print'}">
+                        <td class="${cell ? 'plate-cell-print filled' : 'plate-cell-print'}"${cell ? ` style="${getQpcrGeneCellStyle(cell.geneIndex)}"` : ''}>
                             ${cell ? `<strong>${escapeHtml(cell.gene)}</strong><br><span>${escapeHtml(cell.group)} R${cell.rep}</span>` : '-'}
                         </td>
                     `).join('')}
@@ -2234,7 +2366,7 @@ function buildQpcrPrintHtml(data) {
         const plateBody = plateDesign.plate.map((row, rowIndex) => `
             <tr>
                 <th>${String.fromCharCode(65 + rowIndex)} (${escapeHtml((plateDesign.rowLabels && plateDesign.rowLabels[rowIndex]) ? plateDesign.rowLabels[rowIndex].split(' | ')[1] : '-')})</th>
-                ${row.map(cell => `<td>${cell ? `${escapeHtml(cell.gene)}<br><small>${escapeHtml(cell.group)} R${cell.rep}</small>` : '-'}</td>`).join('')}
+                ${row.map(cell => `<td${cell ? ` class="plate-gene-cell" style="${getQpcrGeneCellStyle(cell.geneIndex)}"` : ''}>${cell ? `${escapeHtml(cell.gene)}<br><small>${escapeHtml(cell.group)} R${cell.rep}</small>` : '-'}</td>`).join('')}
             </tr>
         `).join('');
         return `
@@ -2281,6 +2413,8 @@ p { margin: 4px 0; }
 table { border-collapse: collapse; width: 100%; margin-top: 8px; font-size: 12px; }
 th, td { border: 1px solid #cbd5e1; padding: 6px 8px; text-align: left; white-space: nowrap; }
 th { background: #f8fafc; }
+.plate-gene-cell { background: var(--gene-bg); color: var(--gene-text); border-color: var(--gene-border); font-weight: 700; }
+.plate-gene-cell small { color: #334155; font-weight: 500; }
 .rt th:first-child, .rt td:first-child { background: #f8fafc; font-weight: 600; }
 .muted { color: #475569; }
 @media print { body { margin: 10mm; } h2 { page-break-after: avoid; } }
