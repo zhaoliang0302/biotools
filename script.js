@@ -1673,7 +1673,16 @@ function buildQpcrPlateDesign(groupsList, genesList, replicates) {
             return {
                 plate,
                 assignments,
-                rowLabels: rows.map(rowName => `${rowName} | 混合排布`),
+                rowLabels: rows.map((rowName, rowIndex) => {
+                    if (rowIndex < rotatedRowStart) {
+                        const group = groupsList[rowIndex % groupsList.length];
+                        return `${rowName} | ${group ? group.name : '-'}`;
+                    }
+                    if (mixedLayout.rotatedCount > 0 && rowIndex < mixedLayout.usedRows) {
+                        return `${rowName} | 混合排布`;
+                    }
+                    return `${rowName} | -`;
+                }),
                 colLabels: Array.from({ length: cols }, (_, colIndex) => `${colIndex + 1} | 混合排布`),
                 useReadableLayout: true,
                 layoutMode: 'mixed',
