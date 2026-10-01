@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow, noarchive">
+    <title>登录 · 实验配置助手</title>
+    <style>
+        :root { color-scheme: light; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #1e293b; background: #f1f5f9; }
+        * { box-sizing: border-box; }
+        body { margin: 0; }
+        [hidden] { display: none !important; }
+        .login { min-height: 100vh; min-height: 100dvh; display: grid; place-items: center; padding: 24px; }
+        .card { width: min(100%, 420px); padding: 36px; background: #fff; border: 1px solid #e2e8f0; border-radius: 20px; box-shadow: 0 16px 48px #0f172a0d; }
+        .mark { width: 52px; height: 52px; display: grid; place-items: center; border-radius: 14px; background: #eff6ff; color: #2563eb; margin-bottom: 24px; }
+        h1 { font-size: 24px; margin: 0 0 12px; }
+        p { color: #64748b; line-height: 1.7; margin: 0 0 24px; font-size: 14px; }
+        label { font-size: 14px; font-weight: 600; }
+        input[type="password"], input[type="text"] { width: 100%; padding: 13px 14px; margin: 10px 0 14px; border: 1px solid #cbd5e1; border-radius: 10px; font: inherit; }
+        input:focus-visible, button:focus-visible { outline: 3px solid #93c5fd; outline-offset: 2px; }
+        .show { display: flex; align-items: center; gap: 8px; color: #64748b; font-weight: 400; margin-bottom: 22px; }
+        button { cursor: pointer; font: inherit; border-radius: 10px; border: 0; }
+        .submit { width: 100%; padding: 13px; background: #2563eb; color: #fff; font-weight: 600; }
+        button:disabled { opacity: .65; cursor: wait; }
+        .message { min-height: 24px; margin: 14px 0 0; color: #b91c1c; }
+        .hint { font-size: 12px; margin: 18px 0 0; }
+        .workspace { height: 100vh; height: 100dvh; display: flex; flex-direction: column; }
+        .bar { min-height: 52px; background: #fff; border-bottom: 1px solid #e2e8f0; padding: 8px 20px; display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 13px; }
+        .bar span { color: #64748b; }
+        .lock { padding: 8px 12px; color: #2563eb; background: #eff6ff; white-space: nowrap; }
+        iframe { border: 0; width: 100%; flex: 1; min-height: 0; background: #f8fafc; }
+        @media (max-width: 480px) { .card { padding: 28px 24px; } .bar { padding: 8px 12px; } }
+        @media print { .bar { display: none; } .workspace { height: auto; } iframe { min-height: 100vh; } }
+    </style>
+</head>
+<body>
+    <main id="login" class="login">
+        <section class="card" aria-labelledby="title">
+            <div class="mark" aria-hidden="true"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="10" width="16" height="11" rx="3"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/><path d="M12 14v3"/></svg></div>
+            <h1 id="title">实验配置助手</h1>
+            <p>这是个人使用的实验工具。<br>请输入访问密码，解锁你的工作台。</p>
+            <form id="form">
+                <label for="password">访问密码</label>
+                <input id="password" name="password" type="password" autocomplete="current-password" required aria-describedby="message" autofocus>
+                <label class="show"><input id="show-password" type="checkbox"> 显示密码</label>
+                <button id="submit" class="submit" type="submit">登录并解锁</button>
+                <p id="message" class="message" role="status" aria-live="polite"></p>
+            </form>
+            <p class="hint">闲置 30 分钟自动锁定。刷新或退出前，请先导出需要保留的实验配置；重新打开页面后需要再次输入密码。</p>
+            <noscript><p>请启用浏览器的 JavaScript 后登录。</p></noscript>
+        </section>
+    </main>
+    <section id="workspace" class="workspace" hidden aria-label="实验工作台">
+        <nav class="bar" aria-label="登录状态"><span>已解锁 · 闲置 30 分钟自动锁定</span><button id="lock" class="lock" type="button">退出并锁定</button></nav>
+    </section>
+    <script>
+        'use strict';
+        const login = document.getElementById('login');
+        const workspace = document.getElementById('workspace');
+        const passwordInput = document.getElementById('password');
+        const message = document.getElementById('message');
+        const submit = document.getElementById('submit');
+        const idleLimit = 30 * 60 * 1000;
+        let frame = null;
+        let lastActivity = 0;
+        let expiryTimer = null;
+        let loading = false;
+        const fromBase64 = value => Uint8Array.from(atob(value), char => char.charCodeAt(0));
+
+        function lock(reason = '') {
+            clearInterval(expiryTimer);
+            expiryTimer = null;
+            if (frame) { frame.remove(); frame = null; }
+            workspace.hidden = true;
+            login.hidden = false;
+            passwordInput.value = '';
+            document.getElementById('show-password').checked = false;
+            passwordInput.type = 'password';
+            document.title = '登录 · 实验配置助手';
+            message.textContent = reason;
+            passwordInput.focus();
+        }
+
+        function checkExpiry() {
+            if (frame && Date.now() - lastActivity >= idleLimit) {
+                lock('已因闲置自动锁定。请重新输入密码。');
+            }
+        }
+
+        function activity() {
+            checkExpiry();
+            if (frame) lastActivity = Date.now();
+        }
+
+        for (const event of ['pointerdown', 'keydown', 'input', 'scroll']) {
+            document.addEventListener(event, activity, { passive: true, capture: true });
+        }
+        document.addEventListener('visibilitychange', checkExpiry);
+        window.addEventListener('pageshow', checkExpiry);
+        document.getElementById('lock').addEventListener('click', () => lock());
+        document.getElementById('show-password').addEventListener('change', event => {
+            passwordInput.type = event.target.checked ? 'text' : 'password';
+        });
+        document.getElementById('form').addEventListener('submit', async event => {
+            event.preventDefault();
+            if (loading) return;
+            if (!window.crypto || !crypto.subtle) {
+                message.textContent = '浏览器不支持安全解锁。请使用新版浏览器，通过 HTTPS 打开本站。';
+                return;
+            }
+            loading = true;
+            submit.disabled = true;
+            submit.textContent = '正在解锁…';
+            message.textContent = '';
+            let decrypted = null;
+            try {
+                let payload;
+                try {
+                    const response = await fetch('./encrypted-app.json', { cache: 'no-store' });
+                    if (!response.ok) throw new Error('Download failed');
+                    payload = await response.json();
+                } catch {
+                    throw new Error('工具文件加载失败，请检查网络后重试。');
+                }
+                if (payload.version !== 1 || payload.algorithm !== 'AES-GCM' || payload.kdf !== 'PBKDF2-SHA256' || payload.iterations !== 600000) {
+                    throw new Error('工具文件格式有误，请刷新页面或联系维护者。');
+                }
+                try {
+                    const passwordBytes = new TextEncoder().encode(passwordInput.value);
+                    const material = await crypto.subtle.importKey('raw', passwordBytes, 'PBKDF2', false, ['deriveKey']);
+                    passwordBytes.fill(0);
+                    const key = await crypto.subtle.deriveKey({ name: 'PBKDF2', salt: fromBase64(payload.salt), iterations: payload.iterations, hash: 'SHA-256' }, material, { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
+                    decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: fromBase64(payload.iv), tagLength: 128 }, key, fromBase64(payload.ciphertext));
+                } catch {
+                    throw new Error('密码不正确，或工具文件已损坏。请检查密码后重试。');
+                }
+                passwordInput.value = '';
+                frame = document.createElement('iframe');
+                frame.title = '实验配置助手工作台';
+                frame.addEventListener('load', () => {
+                    if (!frame) return;
+                    for (const event of ['pointerdown', 'keydown', 'input', 'scroll']) {
+                        frame.contentDocument.addEventListener(event, activity, { passive: true, capture: true });
+                    }
+                }, { once: true });
+                frame.srcdoc = new TextDecoder().decode(decrypted);
+                workspace.appendChild(frame);
+                lastActivity = Date.now();
+                expiryTimer = setInterval(checkExpiry, 1000);
+                login.hidden = true;
+                workspace.hidden = false;
+                document.title = '实验配置助手';
+            } catch (error) {
+                message.textContent = error.message;
+                passwordInput.select();
+            } finally {
+                if (decrypted) new Uint8Array(decrypted).fill(0);
+                loading = false;
+                submit.disabled = false;
+                submit.textContent = '登录并解锁';
+            }
+        });
+    </script>
+</body>
+</html>

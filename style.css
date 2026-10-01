@@ -534,6 +534,12 @@ select:focus, input:focus {
     color: var(--primary);
 }
 
+.val-warning {
+    color: #c2410c !important;
+    background: #fff7ed;
+    font-weight: 700;
+}
+
 .group-card {
     background: #f8fafc;
     border-radius: 8px;

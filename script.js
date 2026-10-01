@@ -1370,6 +1370,9 @@ function calculateQpcr() {
     }
     const tube1Plans = buildTube1Plans(cleanGroups.length, cleanGenes, replicates, extraWells, design);
     const tube2Plans = buildTube2Plans(cleanGroups, extraWells, design);
+    const cdnaVolumeChecks = buildQpcrCdnaVolumeChecks(tube2Plans, dilutionRatio);
+    const cdnaCheckByGroup = new Map(cdnaVolumeChecks.map(check => [check.group, check]));
+    rtPlans.forEach(plan => Object.assign(plan, cdnaCheckByGroup.get(plan.group)));
 
     renderQpcrResults({
         minRnaConc,
@@ -1385,6 +1388,7 @@ function calculateQpcr() {
         cleanGroups,
         cleanGenes,
         rtPlans,
+        cdnaVolumeChecks,
         design,
         tube1Plans,
         tube2Plans
@@ -1801,6 +1805,22 @@ function buildTube2Plans(groupsList, extraWells, design) {
     });
 }
 
+function buildQpcrCdnaVolumeChecks(tube2Plans, dilutionRatio) {
+    const dilutedCdnaAvailable = 20 * Math.max(1, dilutionRatio);
+    return tube2Plans.map(plan => {
+        const cdnaRequired = plan.cdna;
+        const isSufficient = cdnaRequired <= dilutedCdnaAvailable;
+        return {
+            group: plan.group,
+            dilutedCdnaAvailable,
+            cdnaRequired,
+            cdnaShortfall: Math.max(0, cdnaRequired - dilutedCdnaAvailable),
+            isCdnaVolumeSufficient: isSufficient,
+            requiredRtReactions: Math.max(1, Math.ceil(cdnaRequired / dilutedCdnaAvailable))
+        };
+    });
+}
+
 function renderQpcrResults(data) {
     lastQpcrData = data;
     document.getElementById('qpcrResultPlaceholder').style.display = 'none';
@@ -1830,10 +1850,17 @@ function renderQpcrAlerts(data) {
     }
     const noWaterGroups = data.rtPlans.filter(p => p.water < 0).map(p => p.group);
     if (noWaterGroups.length > 0) {
-        alerts.push(`以下样品在 20 µL 逆转录体系中无酶水体积为负（RNA 体积过大）：${noWaterGroups.join('、')}。请降低目标 RNA 含量或提高 RNA 浓度。`);
+        alerts.push(`以下样品在 20 µL 逆转录体系中无酶水体积为负（RNA 体积过大）：${noWaterGroups.join('、')}。请降低目标逆转录 RNA 含量。`);
     }
     if (data.cdnaNgPerWell < 5 || data.cdnaNgPerWell > 10) {
         alerts.push(`每孔 cDNA 含量为 ${formatQpcr(data.cdnaNgPerWell)} ng，建议范围 5-10 ng。`);
+    }
+    const insufficientCdnaGroups = data.cdnaVolumeChecks.filter(check => !check.isCdnaVolumeSufficient);
+    if (insufficientCdnaGroups.length > 0) {
+        const details = insufficientCdnaGroups.map(check => (
+            `${check.group}需 ${formatQpcr(check.cdnaRequired)} µL、可用 ${formatQpcr(check.dilutedCdnaAvailable)} µL`
+        )).join('；');
+        alerts.push(`稀释后 cDNA 体积不足：${details}（均已包含富余孔）。请增加对应样本的逆转录反应数或减少上板孔数。`);
     }
     if (data.design.duplicatedReference) {
         alerts.push(`当前基因数量超过单块 96 孔板容量，已自动切换为 ${data.design.plateCount} 块板模式；内参 ${data.design.referenceGene} 已按两块板需求量配置。`);
@@ -1857,6 +1884,7 @@ function renderQpcrCalcTable(data) {
         ['需要加入 RNA 体积', `${formatQpcr(data.rtRnaVolUl)} µL`],
         ['逆转录 cDNA 浓度', `${formatQpcr(data.cdnaConc)} ng/µL`],
         ['每孔 cDNA 含量', `${formatQpcr(data.cdnaNgPerWell)} ng`],
+        ['稀释后 cDNA 体积核对', data.cdnaVolumeChecks.every(check => check.isCdnaVolumeSufficient) ? '所有样本体积充足' : '存在样本 cDNA 体积不足，请查看警告'],
         ['排板模式', `${data.design.plateCount} 块 96 孔板${data.design.duplicatedReference ? `（内参 ${data.design.referenceGene} 两块板均配置）` : ''}`],
         ['建议稀释比例', ratioText]
     ];
@@ -1871,10 +1899,10 @@ function renderQpcrCalcTable(data) {
 function renderQpcrRtTable(rtPlans, dilutionRatio) {
     const head = rtPlans.map(plan => `<th>${plan.group}</th>`).join('');
     const dilutionWaterFor20ul = getDilutionWaterFor20ul(dilutionRatio);
-    const buildRow = (label, getter, highlight = false) => {
+    const buildRow = (label, getter, highlight = false, warningGetter = null) => {
         const cells = rtPlans.map(plan => {
             const val = getter(plan);
-            const cls = highlight ? 'val-highlight' : '';
+            const cls = warningGetter && warningGetter(plan) ? 'val-warning' : (highlight ? 'val-highlight' : '');
             return `<td class="${cls}">${val}</td>`;
         }).join('');
         return `<tr><td>${label}</td>${cells}</tr>`;
@@ -1898,6 +1926,8 @@ function renderQpcrRtTable(rtPlans, dilutionRatio) {
                     ${buildRow('无酶水 (µL)', p => formatQpcr(p.water), true)}
                     ${buildRow('总量 (µL)', () => '20.00')}
                     ${buildRow('cDNA 稀释加无酶水 (µL)', () => formatQpcr(dilutionWaterFor20ul), true)}
+                    ${buildRow('稀释后 cDNA 可用量 (µL)', p => formatQpcr(p.dilutedCdnaAvailable), true)}
+                    ${buildRow('管二所需 cDNA (µL，含富余)', p => formatQpcr(p.cdnaRequired), true, p => !p.isCdnaVolumeSufficient)}
                 </tbody>
             </table>
         </div>
@@ -2032,6 +2062,12 @@ function generateQpcrProtocolText(data) {
     text += `  - 逆转录 cDNA 浓度：${formatQpcr(data.cdnaConc)} ng/µL\n`;
     text += `  - 每孔 cDNA 含量：${formatQpcr(data.cdnaNgPerWell)} ng\n`;
     text += `  - 推荐稀释倍数：${data.dilutionRatio >= 1 ? `1:${formatQpcr(data.dilutionRatio)}` : `浓度不足（比值 ${formatQpcr(data.dilutionRatio)}）`}\n\n`;
+    text += `  - 稀释后 cDNA 体积核对（可用 / 管二所需）：\n`;
+    data.cdnaVolumeChecks.forEach(check => {
+        const status = check.isCdnaVolumeSufficient ? '充足' : `不足 ${formatQpcr(check.cdnaShortfall)} µL，建议至少 ${check.requiredRtReactions} 管逆转录`;
+        text += `    ${check.group}：${formatQpcr(check.dilutedCdnaAvailable)} / ${formatQpcr(check.cdnaRequired)} µL（${status}）\n`;
+    });
+    text += '\n';
     text += `[3. 逆转录体系配置（20 µL/样品）]\n`;
     text += `  - cDNA 稀释加无酶水（每 20 µL 稀释液）：${formatQpcr(dilutionWaterFor20ul)} µL\n`;
     data.rtPlans.forEach(plan => {
@@ -2272,6 +2308,8 @@ function renderQpcrPrintArea(data) {
                         ${rtRow('无酶水 (µL)', p => formatQpcr(p.water))}
                         ${rtRow('总量 (µL)', () => '20.00')}
                         ${rtRow('cDNA 稀释加无酶水 (µL)', () => formatQpcr(dilutionWaterFor20ul))}
+                        ${rtRow('稀释后 cDNA 可用量 (µL)', p => formatQpcr(p.dilutedCdnaAvailable))}
+                        ${rtRow('管二所需 cDNA (µL，含富余)', p => formatQpcr(p.cdnaRequired))}
                     </tbody>
                 </table>
             </section>
@@ -2442,6 +2480,8 @@ ${rtRow('5X Evo Reaction Mix (µL)', p => formatQpcr(p.evoMix))}
 ${rtRow('无酶水 (µL)', p => formatQpcr(p.water))}
 ${rtRow('总量 (µL)', () => '20.00')}
 ${rtRow('cDNA 稀释加无酶水 (µL)', () => formatQpcr(dilutionWaterFor20ul))}
+${rtRow('稀释后 cDNA 可用量 (µL)', p => formatQpcr(p.dilutedCdnaAvailable))}
+${rtRow('管二所需 cDNA (µL，含富余)', p => formatQpcr(p.cdnaRequired))}
 </tbody>
 </table>
 <p class="muted">建议稀释比例：${data.dilutionRatio >= 1 ? `1:${escapeHtml(formatQpcr(data.dilutionRatio))}` : `浓度不足（比值 ${escapeHtml(formatQpcr(data.dilutionRatio))}）`}</p>
