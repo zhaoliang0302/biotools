@@ -2,7 +2,7 @@
 const PRESETS = {
     '6well': {
         name: '六孔板 (6-well)',
-        optiA: 125, lipo: 7.5, optiB: 125, sirna: 5, plasmid: 2.5, p3000: 5
+        optiA: 125, lipo: 5, optiB: 125, sirna: 5, plasmid: 2.5, p3000: 5
     },
     '12well': {
         name: '12孔板 (12-well)',
